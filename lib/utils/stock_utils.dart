@@ -16,8 +16,16 @@ class StockUtils {
 
   // Format price with currency symbol
   static String formatPrice(double price, String currency) {
-    final formatter = NumberFormat.currency(symbol: getCurrencySymbol(currency));
-    return formatter.format(price);
+    try {
+      final formatter = NumberFormat.currency(
+        symbol: getCurrencySymbol(currency),
+        decimalDigits: currency == 'JPY' || currency == 'KRW' ? 0 : 2,
+      );
+      return formatter.format(price);
+    } catch (e) {
+      // Fallback formatting if there's an error
+      return '${getCurrencySymbol(currency)}${price.toStringAsFixed(2)}';
+    }
   }
 
   // Format percentage change
@@ -41,6 +49,18 @@ class StockUtils {
         return '¥';
       case 'INR':
         return '₹';
+      case 'AUD':
+        return 'A\$';
+      case 'CAD':
+        return 'C\$';
+      case 'CHF':
+        return 'Fr';
+      case 'HKD':
+        return 'HK\$';
+      case 'SGD':
+        return 'S\$';
+      case 'KRW':
+        return '₩';
       default:
         return '\$';
     }
@@ -48,14 +68,52 @@ class StockUtils {
 
   // Format large numbers (e.g., volume, market cap)
   static String formatLargeNumber(num number) {
-    if (number >= 1000000000) {
-      return '${(number / 1000000000).toStringAsFixed(2)}B';
-    } else if (number >= 1000000) {
-      return '${(number / 1000000).toStringAsFixed(2)}M';
-    } else if (number >= 1000) {
-      return '${(number / 1000).toStringAsFixed(1)}K';
-    } else {
+    if (number == 0) return '0';
+    
+    try {
+      if (number >= 1000000000) {
+        return '${(number / 1000000000).toStringAsFixed(2)}B';
+      } else if (number >= 1000000) {
+        return '${(number / 1000000).toStringAsFixed(2)}M';
+      } else if (number >= 1000) {
+        return '${(number / 1000).toStringAsFixed(1)}K';
+      } else {
+        return number.toString();
+      }
+    } catch (e) {
       return number.toString();
+    }
+  }
+
+  // Format date and time
+  static String formatDateTime(DateTime dateTime) {
+    try {
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+      
+      if (difference.inSeconds < 60) {
+        return 'Just now';
+      } else if (difference.inMinutes < 60) {
+        return '${difference.inMinutes}m ago';
+      } else if (difference.inHours < 24) {
+        return '${difference.inHours}h ago';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays}d ago';
+      } else {
+        return DateFormat('MMM d, y').format(dateTime);
+      }
+    } catch (e) {
+      // Fallback to basic formatting
+      return DateFormat('MM/dd/yy').format(dateTime);
+    }
+  }
+
+  // Format date only
+  static String formatDate(DateTime date) {
+    try {
+      return DateFormat('MMM d, y').format(date);
+    } catch (e) {
+      return date.toString().split(' ')[0];
     }
   }
 

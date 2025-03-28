@@ -11,7 +11,7 @@ import 'package:stockwise/widgets/forex_card.dart';
 import 'package:stockwise/screens/stock_details_screen.dart';
 import 'package:stockwise/screens/news_details_screen.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher.dart' as launcher;
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -87,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
 
     try {
-      final news = await _apiService.fetchMarketNews();
+      final news = await _apiService.fetchMarketNews(limit: 15);
       
       setState(() {
         _latestNews = news;
@@ -147,6 +147,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
       ),
     );
   }
@@ -162,6 +166,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           SnackBar(
             content: Text('${stock.symbol} added to watchlist'),
             backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       } else {
@@ -173,6 +181,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           SnackBar(
             content: Text('${stock.symbol} removed from watchlist'),
             backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       }
@@ -181,21 +193,44 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
-  void _openNewsUrl(String url) async {
-    if (await canLaunch(url)) {
-      await launch(url);
-    } else {
-      _showErrorSnackBar('Could not open news article');
+  Future<void> _openNewsUrl(String url) async {
+    try {
+      final Uri uri = Uri.parse(url);
+      if (await launcher.canLaunchUrl(uri)) {
+        await launcher.launchUrl(uri, mode: launcher.LaunchMode.externalApplication);
+      } else {
+        _showErrorSnackBar('Could not open news article');
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error opening URL: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
       appBar: AppBar(
-        title: const Text('StockWise'),
+        title: Row(
+          children: [
+            Icon(Icons.show_chart, color: theme.colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              'StockWise',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onBackground,
+              ),
+            ),
+          ],
+        ),
+        elevation: 0,
         bottom: TabBar(
           controller: _tabController,
+          indicatorColor: theme.colorScheme.primary,
+          labelColor: theme.colorScheme.primary,
+          unselectedLabelColor: theme.colorScheme.onSurface.withOpacity(0.7),
           tabs: const [
             Tab(text: 'Stocks'),
             Tab(text: 'News'),
@@ -206,42 +241,112 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
+            tooltip: 'Refresh data',
+          ),
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () => Navigator.pushNamed(context, '/search'),
+            tooltip: 'Search stocks',
           ),
         ],
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildStocksTab(),
-          _buildNewsTab(),
-          _buildForexTab(),
-        ],
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              theme.colorScheme.background,
+              theme.colorScheme.background.withOpacity(0.95),
+            ],
+          ),
+        ),
+        child: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildStocksTab(),
+            _buildNewsTab(),
+            _buildForexTab(),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildStocksTab() {
     if (_isLoadingStocks) {
-      return const Center(
+      return Center(
         child: SpinKitWave(
-          color: Colors.blue,
+          color: Theme.of(context).colorScheme.primary,
           size: 50.0,
         ),
       );
     }
 
     if (_topStocks.isEmpty) {
-      return const Center(
-        child: Text('No stocks available'),
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.error.withOpacity(0.7),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No stocks available',
+              style: TextStyle(
+                fontSize: 18,
+                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadTopStocks,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       );
     }
 
     return RefreshIndicator(
       onRefresh: _loadTopStocks,
       child: ListView.builder(
-        itemCount: _topStocks.length,
+        padding: const EdgeInsets.only(top: 8, bottom: 16),
+        itemCount: _topStocks.length + 1, // +1 for header
         itemBuilder: (context, index) {
-          final stock = _topStocks[index];
+          if (index == 0) {
+            // Header
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Top Stocks',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onBackground,
+                    ),
+                  ),
+                  Text(
+                    'Updated: ${StockUtils.formatDateTime(DateTime.now())}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
+          final stockIndex = index - 1;
+          final stock = _topStocks[stockIndex];
           final isInWatchlist = _watchlist.contains(stock.symbol);
           
           return StockCard(
@@ -249,11 +354,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             isInWatchlist: isInWatchlist,
             onWatchlistToggle: (add) => _toggleWatchlist(stock, add),
             onTap: () {
-              Navigator.push(
+              Navigator.pushNamed(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => StockDetailsScreen(symbol: stock.symbol),
-                ),
+                '/stock_details',
+                arguments: {'symbol': stock.symbol},
               );
             },
           );
@@ -264,38 +368,87 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Widget _buildNewsTab() {
     if (_isLoadingNews) {
-      return const Center(
+      return Center(
         child: SpinKitWave(
-          color: Colors.blue,
+          color: Theme.of(context).colorScheme.primary,
           size: 50.0,
         ),
       );
     }
 
     if (_latestNews.isEmpty) {
-      return const Center(
-        child: Text('No news available'),
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.newspaper,
+              size: 48,
+              color: Theme.of(context).colorScheme.onBackground.withOpacity(0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No news available',
+              style: TextStyle(
+                fontSize: 18,
+                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadLatestNews,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       );
     }
 
     return RefreshIndicator(
       onRefresh: _loadLatestNews,
       child: ListView.builder(
-        itemCount: _latestNews.length,
+        padding: const EdgeInsets.only(top: 8, bottom: 16),
+        itemCount: _latestNews.length + 1, // +1 for header
         itemBuilder: (context, index) {
-          final news = _latestNews[index];
+          if (index == 0) {
+            // Header
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Latest News',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onBackground,
+                    ),
+                  ),
+                  Text(
+                    'Updated: ${StockUtils.formatDateTime(DateTime.now())}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
+          final newsIndex = index - 1;
+          final news = _latestNews[newsIndex];
           
           return NewsCard(
             news: news,
             onTap: () {
-              Navigator.push(
+              Navigator.pushNamed(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => NewsDetailsScreen(news: news),
-                ),
-              ).then((_) {
-                // Refresh if needed
-              });
+                '/news_details',
+                arguments: {'news': news},
+              );
             },
           );
         },
@@ -305,26 +458,78 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Widget _buildForexTab() {
     if (_isLoadingForex) {
-      return const Center(
+      return Center(
         child: SpinKitWave(
-          color: Colors.blue,
+          color: Theme.of(context).colorScheme.primary,
           size: 50.0,
         ),
       );
     }
 
     if (_forexRates.isEmpty) {
-      return const Center(
-        child: Text('No forex rates available'),
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.currency_exchange,
+              size: 48,
+              color: Theme.of(context).colorScheme.onBackground.withOpacity(0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No forex rates available',
+              style: TextStyle(
+                fontSize: 18,
+                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadForexRates,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       );
     }
 
     return RefreshIndicator(
       onRefresh: _loadForexRates,
       child: ListView.builder(
-        itemCount: _forexRates.length,
+        padding: const EdgeInsets.only(top: 8, bottom: 16),
+        itemCount: _forexRates.length + 1, // +1 for header
         itemBuilder: (context, index) {
-          final forex = _forexRates[index];
+          if (index == 0) {
+            // Header
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Forex Rates',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onBackground,
+                    ),
+                  ),
+                  Text(
+                    'Updated: ${StockUtils.formatDateTime(DateTime.now())}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
+          final forexIndex = index - 1;
+          final forex = _forexRates[forexIndex];
           
           return ForexCard(
             forex: forex,
@@ -333,6 +538,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('${forex.baseCurrency}/${forex.quoteCurrency} rate: ${forex.exchangeRate}'),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               );
             },
