@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:stockwise/services/auth_service.dart';
-import 'package:stockwise/services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:stockwise/services/auth_service.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:stockwise/screens/register_screen.dart';
+import 'package:stockwise/screens/forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -13,7 +14,6 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
-  final DatabaseService _databaseService = DatabaseService();
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -43,39 +43,17 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text.trim(),
       );
       
-      // Sync local favorites to Firestore
-      await _databaseService.syncWatchlistToFirestore();
-      
-      // Navigate to home screen
+      // Navigate to home screen on successful login
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
+        Navigator.pushReplacementNamed(context, '/home');
       }
     } on FirebaseAuthException catch (e) {
-      String message;
-      
-      switch (e.code) {
-        case 'user-not-found':
-          message = 'No user found with this email.';
-          break;
-        case 'wrong-password':
-          message = 'Wrong password provided.';
-          break;
-        case 'invalid-email':
-          message = 'The email address is not valid.';
-          break;
-        case 'user-disabled':
-          message = 'This user has been disabled.';
-          break;
-        default:
-          message = 'An error occurred: ${e.message}';
-      }
-      
       setState(() {
-        _errorMessage = message;
+        _errorMessage = e.message ?? 'An error occurred during sign in';
       });
     } catch (e) {
       setState(() {
-        _errorMessage = 'An error occurred: $e';
+        _errorMessage = e.toString();
       });
     } finally {
       if (mounted) {
@@ -95,17 +73,14 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await _authService.signInWithGoogle();
       
-      // Sync local favorites to Firestore
-      await _databaseService.syncWatchlistToFirestore();
-      
-      // Navigate to home screen
+      // Navigate to home screen on successful login
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
+        Navigator.pushReplacementNamed(context, '/home');
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Failed to sign in with Google: $e';
+          _errorMessage = e.toString();
         });
       }
     } finally {
@@ -118,40 +93,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _navigateToRegister() {
-    Navigator.pushNamed(context, '/register');
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const RegisterScreen()),
+    );
   }
 
-  void _resetPassword() async {
-    if (_emailController.text.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter your email address.';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      await _authService.resetPassword(_emailController.text.trim());
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Password reset email sent. Check your inbox.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to send reset email: $e';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+  void _navigateToForgotPassword() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()),
+    );
   }
 
   @override
@@ -302,7 +254,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
-                              onPressed: _resetPassword,
+                              onPressed: _navigateToForgotPassword,
                               child: const Text('Forgot Password?'),
                             ),
                           ),

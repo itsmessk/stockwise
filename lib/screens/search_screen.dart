@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:stockwise/models/stock.dart';
 import 'package:stockwise/services/api_service.dart';
 import 'package:stockwise/services/database_service.dart';
-import 'package:stockwise/widgets/stock_card.dart';
-import 'package:stockwise/screens/stock_details_screen.dart';
+import 'package:stockwise/models/stock.dart';
+import 'package:stockwise/widgets/stock_list_item.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -18,15 +17,16 @@ class _SearchScreenState extends State<SearchScreen> {
   final DatabaseService _databaseService = DatabaseService();
   final TextEditingController _searchController = TextEditingController();
   
-  List<Stock> _searchResults = [];
-  List<String> _watchlist = [];
   bool _isLoading = false;
-  bool _hasSearched = false;
+  bool _isHistoryLoading = true;
+  List<Stock> _searchResults = [];
+  List<String> _searchHistory = [];
+  String _errorMessage = '';
 
   @override
   void initState() {
     super.initState();
-    _loadWatchlist();
+    _loadSearchHistory();
   }
 
   @override
@@ -35,225 +35,306 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
-  Future<void> _loadWatchlist() async {
+  Future<void> _loadSearchHistory() async {
     try {
-      final watchlistData = await _databaseService.getWatchlist();
       setState(() {
-        _watchlist = watchlistData.map((item) => item['symbol'] as String).toList();
+        _isHistoryLoading = true;
+      });
+      
+      final history = await _databaseService.getSearchHistory();
+      
+      setState(() {
+        _searchHistory = history;
+        _isHistoryLoading = false;
       });
     } catch (e) {
-      _showErrorSnackBar('Failed to load watchlist: $e');
+      setState(() {
+        _isHistoryLoading = false;
+      });
     }
   }
 
   Future<void> _searchStocks(String query) async {
-    if (query.isEmpty) return;
+    if (query.trim().isEmpty) return;
     
     setState(() {
       _isLoading = true;
-      _hasSearched = true;
+      _errorMessage = '';
+      _searchResults = [];
     });
 
     try {
-      // Split the query by commas or spaces to search for multiple symbols
-      final symbols = query.split(RegExp(r'[,\s]+')).where((s) => s.isNotEmpty).toList();
+      final results = await _apiService.searchStocks(query);
       
-      if (symbols.isEmpty) {
-        setState(() {
-          _searchResults = [];
-          _isLoading = false;
-        });
-        return;
-      }
-      
-      final stocks = await _apiService.fetchLiveStockPrices(symbols);
+      // Add to search history
+      await _databaseService.addToSearchHistory(query);
+      await _loadSearchHistory();
       
       setState(() {
-        _searchResults = stocks;
+        _searchResults = results;
         _isLoading = false;
       });
-      
-      // Save stock data to local database for offline access
-      for (var stock in stocks) {
-        await _databaseService.saveStockData(stock);
-      }
     } catch (e) {
       setState(() {
+        _errorMessage = 'Failed to search stocks: $e';
         _isLoading = false;
       });
-      _showErrorSnackBar('Failed to search stocks: $e');
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
+  Future<void> _checkFavoriteStatus() async {
+    if (_searchResults.isEmpty) return;
+    
+    final updatedResults = <Stock>[];
+    
+    for (final stock in _searchResults) {
+      final isInWatchlist = await _databaseService.isInWatchlist(stock.symbol);
+      
+      // Create a new stock with the same properties
+      final updatedStock = Stock(
+        symbol: stock.symbol,
+        name: stock.name,
+        price: stock.price,
+        change: stock.change,
+        changePercent: stock.changePercent,
+        high: stock.high,
+        low: stock.low,
+        open: stock.open,
+        previousClose: stock.previousClose,
+        volume: stock.volume,
+        lastUpdated: stock.lastUpdated,
+      );
+      
+      updatedResults.add(updatedStock);
+    }
+    
+    setState(() {
+      _searchResults = updatedResults;
+    });
+  }
+
+  void _navigateToStockDetails(String symbol) {
+    Navigator.pushNamed(
+      context,
+      '/stock_details',
+      arguments: {'symbol': symbol},
     );
   }
 
-  Future<void> _toggleWatchlist(Stock stock, bool add) async {
-    try {
-      if (add) {
-        await _databaseService.addToWatchlist(stock.symbol, stock.name);
-        setState(() {
-          _watchlist.add(stock.symbol);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${stock.symbol} added to watchlist'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        await _databaseService.removeFromWatchlist(stock.symbol);
-        setState(() {
-          _watchlist.remove(stock.symbol);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${stock.symbol} removed from watchlist'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      _showErrorSnackBar('Failed to update watchlist: $e');
+  Future<void> _toggleFavorite(Stock stock) async {
+    final isInWatchlist = await _databaseService.isInWatchlist(stock.symbol);
+    
+    if (isInWatchlist) {
+      await _databaseService.removeFromWatchlist(stock.symbol);
+    } else {
+      await _databaseService.addToWatchlist(stock);
     }
+    
+    // Refresh the favorite status
+    await _checkFavoriteStatus();
+  }
+
+  void _clearSearchHistory() async {
+    await _databaseService.clearSearchHistory();
+    await _loadSearchHistory();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Search Stocks'),
       ),
       body: Column(
         children: [
+          // Search bar
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: 'Enter stock symbol (e.g., AAPL, MSFT)',
+                hintText: 'Search by company name or symbol',
                 prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _searchController.clear();
-                  },
-                ),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchResults = [];
+                          });
+                        },
+                      )
+                    : null,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
               onSubmitted: _searchStocks,
               textInputAction: TextInputAction.search,
+              onChanged: (value) {
+                setState(() {});
+              },
             ),
           ),
-          Expanded(
-            child: _buildSearchResults(),
-          ),
+          
+          // Loading indicator
+          if (_isLoading)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SpinKitWave(
+                      color: theme.colorScheme.primary,
+                      size: 40.0,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Searching...',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: theme.colorScheme.onBackground,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          // Error message
+          else if (_errorMessage.isNotEmpty)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: theme.colorScheme.error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Something went wrong',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onBackground,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _errorMessage,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: theme.colorScheme.onBackground.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () => _searchStocks(_searchController.text),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          // Search results
+          else if (_searchResults.isNotEmpty)
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _searchResults.length,
+                separatorBuilder: (context, index) => const Divider(),
+                itemBuilder: (context, index) {
+                  final stock = _searchResults[index];
+                  return StockListItem(
+                    stock: stock,
+                    onTap: () => _navigateToStockDetails(stock.symbol),
+                    isFavorite: false, // We'll update this with actual data
+                    onFavoriteToggle: () => _toggleFavorite(stock),
+                  );
+                },
+              ),
+            )
+          // Search history
+          else
+            Expanded(
+              child: _isHistoryLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Recent Searches',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.onBackground,
+                                ),
+                              ),
+                              if (_searchHistory.isNotEmpty)
+                                TextButton(
+                                  onPressed: _clearSearchHistory,
+                                  child: const Text('Clear All'),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: _searchHistory.isEmpty
+                              ? Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.search,
+                                        size: 48,
+                                        color: theme.colorScheme.onBackground.withOpacity(0.3),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'No recent searches',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: theme.colorScheme.onBackground.withOpacity(0.7),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : ListView.builder(
+                                  itemCount: _searchHistory.length,
+                                  itemBuilder: (context, index) {
+                                    final query = _searchHistory[index];
+                                    return ListTile(
+                                      leading: const Icon(Icons.history),
+                                      title: Text(query),
+                                      onTap: () {
+                                        _searchController.text = query;
+                                        _searchStocks(query);
+                                      },
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+            ),
         ],
       ),
-    );
-  }
-
-  Widget _buildSearchResults() {
-    if (_isLoading) {
-      return const Center(
-        child: SpinKitWave(
-          color: Colors.blue,
-          size: 50.0,
-        ),
-      );
-    }
-
-    if (!_hasSearched) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search,
-              size: 80,
-              color: Colors.grey.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Search for stock symbols',
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Example: AAPL, MSFT, GOOGL',
-              style: TextStyle(
-                color: Colors.grey,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_searchResults.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.sentiment_dissatisfied,
-              size: 80,
-              color: Colors.grey.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'No results found',
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Try searching for different symbols',
-              style: TextStyle(
-                color: Colors.grey,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: _searchResults.length,
-      itemBuilder: (context, index) {
-        final stock = _searchResults[index];
-        final isInWatchlist = _watchlist.contains(stock.symbol);
-        
-        return StockCard(
-          stock: stock,
-          isInWatchlist: isInWatchlist,
-          onWatchlistToggle: (add) => _toggleWatchlist(stock, add),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => StockDetailsScreen(symbol: stock.symbol),
-              ),
-            ).then((_) {
-              // Refresh watchlist when returning from details
-              _loadWatchlist();
-            });
-          },
-        );
-      },
     );
   }
 }

@@ -1,17 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:stockwise/models/stock.dart';
-import 'package:stockwise/models/news.dart';
-import 'package:stockwise/models/forex.dart';
 import 'package:stockwise/services/api_service.dart';
 import 'package:stockwise/services/database_service.dart';
-import 'package:stockwise/utils/stock_utils.dart';
-import 'package:stockwise/widgets/stock_card.dart';
+import 'package:stockwise/models/stock.dart';
+import 'package:stockwise/models/news.dart';
+import 'package:stockwise/widgets/stock_list_item.dart';
 import 'package:stockwise/widgets/news_card.dart';
-import 'package:stockwise/widgets/forex_card.dart';
-import 'package:stockwise/screens/stock_details_screen.dart';
-import 'package:stockwise/screens/news_details_screen.dart';
+import 'package:stockwise/widgets/market_overview_card.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
-import 'package:url_launcher/url_launcher.dart' as launcher;
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -20,533 +15,382 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> {
   final ApiService _apiService = ApiService();
   final DatabaseService _databaseService = DatabaseService();
   
-  late TabController _tabController;
+  bool _isLoading = true;
+  bool _isWatchlistLoading = true;
+  bool _isNewsLoading = true;
   
-  List<Stock> _topStocks = [];
-  List<News> _latestNews = [];
-  List<Forex> _forexRates = [];
-  List<String> _watchlist = [];
+  List<Stock> _watchlist = [];
+  List<Stock> _topGainers = [];
+  List<Stock> _topLosers = [];
+  List<NewsArticle> _news = [];
   
-  bool _isLoadingStocks = true;
-  bool _isLoadingNews = true;
-  bool _isLoadingForex = true;
-  bool _isLoadingWatchlist = true;
+  String _errorMessage = '';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     _loadData();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadData() async {
-    _loadTopStocks();
-    _loadLatestNews();
-    _loadForexRates();
-    _loadWatchlist();
-  }
-
-  Future<void> _loadTopStocks() async {
     setState(() {
-      _isLoadingStocks = true;
+      _isLoading = true;
+      _errorMessage = '';
     });
 
-    try {
-      final stocks = await _apiService.fetchLiveStockPrices(StockUtils.getPopularStocks());
-      
-      setState(() {
-        _topStocks = stocks;
-        _isLoadingStocks = false;
-      });
-      
-      // Save stock data to local database for offline access
-      for (var stock in stocks) {
-        await _databaseService.saveStockData(stock);
-      }
-    } catch (e) {
-      setState(() {
-        _isLoadingStocks = false;
-      });
-      _showErrorSnackBar('Failed to load stocks: $e');
-    }
-  }
+    await Future.wait([
+      _loadWatchlist(),
+      _loadMarketMovers(),
+      _loadNews(),
+    ]);
 
-  Future<void> _loadLatestNews() async {
     setState(() {
-      _isLoadingNews = true;
+      _isLoading = false;
     });
-
-    try {
-      final news = await _apiService.fetchMarketNews(limit: 15);
-      
-      setState(() {
-        _latestNews = news;
-        _isLoadingNews = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoadingNews = false;
-      });
-      _showErrorSnackBar('Failed to load news: $e');
-    }
-  }
-
-  Future<void> _loadForexRates() async {
-    setState(() {
-      _isLoadingForex = true;
-    });
-
-    try {
-      final forex = await _apiService.fetchForexRates();
-      
-      setState(() {
-        _forexRates = forex;
-        _isLoadingForex = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoadingForex = false;
-      });
-      _showErrorSnackBar('Failed to load forex rates: $e');
-    }
   }
 
   Future<void> _loadWatchlist() async {
-    setState(() {
-      _isLoadingWatchlist = true;
-    });
-
     try {
-      final watchlistData = await _databaseService.getWatchlist();
-      final symbols = watchlistData.map((item) => item['symbol'] as String).toList();
+      setState(() {
+        _isWatchlistLoading = true;
+      });
+      
+      // Get watchlist from Firestore
+      final watchlist = await _databaseService.getWatchlist();
+      
+      // Update watchlist with latest data
+      final updatedWatchlist = <Stock>[];
+      
+      for (final stock in watchlist) {
+        try {
+          final updatedStock = await _apiService.getStockQuote(stock.symbol);
+          updatedWatchlist.add(updatedStock);
+          
+          // Update stock in Firestore
+          await _databaseService.updateStockPrice(
+            stock.symbol,
+            updatedStock.price,
+            updatedStock.change,
+            updatedStock.changePercent,
+            updatedStock.lastUpdated,
+          );
+        } catch (e) {
+          // If we can't get updated data, use the stored data
+          updatedWatchlist.add(stock);
+        }
+      }
       
       setState(() {
-        _watchlist = symbols;
-        _isLoadingWatchlist = false;
+        _watchlist = updatedWatchlist;
+        _isWatchlistLoading = false;
       });
     } catch (e) {
       setState(() {
-        _isLoadingWatchlist = false;
+        _errorMessage = 'Failed to load watchlist: $e';
+        _isWatchlistLoading = false;
       });
-      _showErrorSnackBar('Failed to load watchlist: $e');
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
+  Future<void> _loadMarketMovers() async {
+    try {
+      // For demonstration, we'll use some predefined symbols
+      // In a real app, you would get these from an API endpoint
+      final gainers = await Future.wait([
+        _apiService.getStockQuote('AAPL'),
+        _apiService.getStockQuote('MSFT'),
+        _apiService.getStockQuote('GOOGL'),
+        _apiService.getStockQuote('AMZN'),
+      ]);
+      
+      final losers = await Future.wait([
+        _apiService.getStockQuote('TSLA'),
+        _apiService.getStockQuote('FB'),
+        _apiService.getStockQuote('NFLX'),
+        _apiService.getStockQuote('NVDA'),
+      ]);
+      
+      setState(() {
+        _topGainers = gainers;
+        _topLosers = losers;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load market movers: $e';
+      });
+    }
+  }
+
+  Future<void> _loadNews() async {
+    try {
+      setState(() {
+        _isNewsLoading = true;
+      });
+      
+      final newsResponse = await _apiService.getMarketNews(limit: 10);
+      
+      setState(() {
+        _news = newsResponse.articles;
+        _isNewsLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load news: $e';
+        _isNewsLoading = false;
+      });
+    }
+  }
+
+  void _navigateToStockDetails(String symbol) {
+    Navigator.pushNamed(
+      context,
+      '/stock_details',
+      arguments: {'symbol': symbol},
     );
   }
 
-  Future<void> _toggleWatchlist(Stock stock, bool add) async {
-    try {
-      if (add) {
-        await _databaseService.addToWatchlist(stock.symbol, stock.name);
-        setState(() {
-          _watchlist.add(stock.symbol);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${stock.symbol} added to watchlist'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      } else {
-        await _databaseService.removeFromWatchlist(stock.symbol);
-        setState(() {
-          _watchlist.remove(stock.symbol);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${stock.symbol} removed from watchlist'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      _showErrorSnackBar('Failed to update watchlist: $e');
-    }
-  }
-
-  Future<void> _openNewsUrl(String url) async {
-    try {
-      final Uri uri = Uri.parse(url);
-      if (await launcher.canLaunchUrl(uri)) {
-        await launcher.launchUrl(uri, mode: launcher.LaunchMode.externalApplication);
-      } else {
-        _showErrorSnackBar('Could not open news article');
-      }
-    } catch (e) {
-      _showErrorSnackBar('Error opening URL: $e');
-    }
+  void _navigateToNewsDetails(NewsArticle news) {
+    Navigator.pushNamed(
+      context,
+      '/news_details',
+      arguments: {'news': news},
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
+    if (_isLoading) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SpinKitWave(
+                color: theme.colorScheme.primary,
+                size: 50.0,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Loading market data...',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: theme.colorScheme.onBackground,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            Icon(Icons.show_chart, color: theme.colorScheme.primary),
-            const SizedBox(width: 8),
-            Text(
-              'StockWise',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: theme.colorScheme.onBackground,
-              ),
-            ),
-          ],
-        ),
-        elevation: 0,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: theme.colorScheme.primary,
-          labelColor: theme.colorScheme.primary,
-          unselectedLabelColor: theme.colorScheme.onSurface.withOpacity(0.7),
-          tabs: const [
-            Tab(text: 'Stocks'),
-            Tab(text: 'News'),
-            Tab(text: 'Forex'),
-          ],
-        ),
+        title: const Text('StockWise'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
-            tooltip: 'Refresh data',
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () => Navigator.pushNamed(context, '/search'),
-            tooltip: 'Search stocks',
           ),
         ],
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              theme.colorScheme.background,
-              theme.colorScheme.background.withOpacity(0.95),
-            ],
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: _errorMessage.isNotEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: theme.colorScheme.error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Something went wrong',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onBackground,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _errorMessage,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: theme.colorScheme.onBackground.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: _loadData,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // Market Overview Card
+                  MarketOverviewCard(
+                    gainers: _topGainers,
+                    losers: _topLosers,
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Watchlist Section
+                  _buildSectionHeader('Your Watchlist', Icons.star),
+                  const SizedBox(height: 8),
+                  _isWatchlistLoading
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        )
+                      : _watchlist.isEmpty
+                          ? _buildEmptyState(
+                              'No stocks in watchlist',
+                              'Add stocks to your watchlist to track them here',
+                              Icons.star_border,
+                              () {
+                                Navigator.pushNamed(context, '/search');
+                              },
+                              'Add Stocks',
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: _watchlist.length,
+                              separatorBuilder: (context, index) => const Divider(),
+                              itemBuilder: (context, index) {
+                                final stock = _watchlist[index];
+                                return StockListItem(
+                                  stock: stock,
+                                  onTap: () => _navigateToStockDetails(stock.symbol),
+                                  isFavorite: true,
+                                  onFavoriteToggle: () async {
+                                    await _databaseService.removeFromWatchlist(stock.symbol);
+                                    _loadWatchlist();
+                                  },
+                                );
+                              },
+                            ),
+                  const SizedBox(height: 24),
+                  
+                  // Market News Section
+                  _buildSectionHeader('Market News', Icons.newspaper),
+                  const SizedBox(height: 8),
+                  _isNewsLoading
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        )
+                      : _news.isEmpty
+                          ? _buildEmptyState(
+                              'No news available',
+                              'Check back later for market news',
+                              Icons.newspaper,
+                              _loadNews,
+                              'Refresh',
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: _news.length,
+                              itemBuilder: (context, index) {
+                                final article = _news[index];
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 16),
+                                  child: NewsCard(
+                                    article: article,
+                                    onTap: () => _navigateToNewsDetails(article),
+                                  ),
+                                );
+                              },
+                            ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
           ),
         ),
-        child: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildStocksTab(),
-            _buildNewsTab(),
-            _buildForexTab(),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
-  Widget _buildStocksTab() {
-    if (_isLoadingStocks) {
-      return Center(
-        child: SpinKitWave(
-          color: Theme.of(context).colorScheme.primary,
-          size: 50.0,
+  Widget _buildEmptyState(
+    String title,
+    String subtitle,
+    IconData icon,
+    VoidCallback onAction,
+    String actionText,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
         ),
-      );
-    }
-
-    if (_topStocks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              size: 48,
-              color: Theme.of(context).colorScheme.error.withOpacity(0.7),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No stocks available',
-              style: TextStyle(
-                fontSize: 18,
-                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadTopStocks,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadTopStocks,
-      child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8, bottom: 16),
-        itemCount: _topStocks.length + 1, // +1 for header
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            // Header
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Top Stocks',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onBackground,
-                    ),
-                  ),
-                  Text(
-                    'Updated: ${StockUtils.formatDateTime(DateTime.now())}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-          
-          final stockIndex = index - 1;
-          final stock = _topStocks[stockIndex];
-          final isInWatchlist = _watchlist.contains(stock.symbol);
-          
-          return StockCard(
-            stock: stock,
-            isInWatchlist: isInWatchlist,
-            onWatchlistToggle: (add) => _toggleWatchlist(stock, add),
-            onTap: () {
-              Navigator.pushNamed(
-                context,
-                '/stock_details',
-                arguments: {'symbol': stock.symbol},
-              );
-            },
-          );
-        },
       ),
-    );
-  }
-
-  Widget _buildNewsTab() {
-    if (_isLoadingNews) {
-      return Center(
-        child: SpinKitWave(
-          color: Theme.of(context).colorScheme.primary,
-          size: 50.0,
-        ),
-      );
-    }
-
-    if (_latestNews.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.newspaper,
-              size: 48,
-              color: Theme.of(context).colorScheme.onBackground.withOpacity(0.5),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size: 48,
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'No news available',
-              style: TextStyle(
-                fontSize: 18,
-                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
-              ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadLatestNews,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadLatestNews,
-      child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8, bottom: 16),
-        itemCount: _latestNews.length + 1, // +1 for header
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            // Header
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Latest News',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onBackground,
-                    ),
-                  ),
-                  Text(
-                    'Updated: ${StockUtils.formatDateTime(DateTime.now())}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-          
-          final newsIndex = index - 1;
-          final news = _latestNews[newsIndex];
-          
-          return NewsCard(
-            news: news,
-            onTap: () {
-              Navigator.pushNamed(
-                context,
-                '/news_details',
-                arguments: {'news': news},
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildForexTab() {
-    if (_isLoadingForex) {
-      return Center(
-        child: SpinKitWave(
-          color: Theme.of(context).colorScheme.primary,
-          size: 50.0,
-        ),
-      );
-    }
-
-    if (_forexRates.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.currency_exchange,
-              size: 48,
-              color: Theme.of(context).colorScheme.onBackground.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No forex rates available',
-              style: TextStyle(
-                fontSize: 18,
-                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadForexRates,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadForexRates,
-      child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8, bottom: 16),
-        itemCount: _forexRates.length + 1, // +1 for header
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            // Header
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Forex Rates',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onBackground,
-                    ),
-                  ),
-                  Text(
-                    'Updated: ${StockUtils.formatDateTime(DateTime.now())}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-          
-          final forexIndex = index - 1;
-          final forex = _forexRates[forexIndex];
-          
-          return ForexCard(
-            forex: forex,
-            onTap: () {
-              // Show detailed forex view if needed
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${forex.baseCurrency}/${forex.quoteCurrency} rate: ${forex.exchangeRate}'),
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: onAction,
+            child: Text(actionText),
+          ),
+        ],
       ),
     );
   }

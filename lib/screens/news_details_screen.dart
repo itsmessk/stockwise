@@ -1,141 +1,170 @@
 import 'package:flutter/material.dart';
 import 'package:stockwise/models/news.dart';
-import 'package:stockwise/services/localization_service.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class NewsDetailsScreen extends StatelessWidget {
-  final News news;
+  final NewsArticle news;
 
   const NewsDetailsScreen({
     Key? key,
     required this.news,
   }) : super(key: key);
 
-  Future<void> _openNewsUrl() async {
-    final url = news.url;
-    if (await canLaunch(url)) {
-      await launch(url);
-    } else {
-      throw 'Could not launch $url';
+  Future<void> _launchUrl(String url) async {
+    final Uri uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      throw Exception('Could not launch $url');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    // Format the published date
+    String formattedDate = '';
+    try {
+      final date = DateTime.parse(news.publishedAt);
+      formattedDate = DateFormat.yMMMMd().format(date);
+    } catch (e) {
+      formattedDate = news.publishedAt;
+    }
+    
     return Scaffold(
       appBar: AppBar(
-        title: const Text('News Details'),
+        title: const Text('News'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.open_in_browser),
-            onPressed: _openNewsUrl,
-          ),
+          if (news.url != null && news.url!.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.open_in_browser),
+              onPressed: () => _launchUrl(news.url!),
+            ),
         ],
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (news.imageUrl.isNotEmpty)
+            // News image
+            if (news.urlToImage != null && news.urlToImage!.isNotEmpty)
               SizedBox(
-                height: 200,
+                height: 250,
                 width: double.infinity,
                 child: Image.network(
-                  news.imageUrl,
+                  news.urlToImage!,
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) {
                     return Container(
-                      height: 200,
-                      color: Colors.grey.shade200,
-                      child: const Center(
+                      height: 250,
+                      width: double.infinity,
+                      color: theme.colorScheme.primary.withOpacity(0.1),
+                      child: Center(
                         child: Icon(
                           Icons.image_not_supported,
-                          color: Colors.grey,
-                          size: 50,
+                          color: theme.colorScheme.primary.withOpacity(0.5),
+                          size: 48,
                         ),
                       ),
                     );
                   },
                 ),
               ),
+            
+            // News content
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Title
                   Text(
                     news.title,
-                    style: const TextStyle(
+                    style: TextStyle(
+                      fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      fontSize: 22,
+                      color: theme.colorScheme.onBackground,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
+                  
+                  // Source and date
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        news.source,
-                        style: TextStyle(
-                          color: Theme.of(context).primaryColor,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        LocalizationService.formatDateTime(news.publishedAt),
-                        style: TextStyle(
-                          color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (news.relatedSymbols.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Related Symbols:',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: news.relatedSymbols.map((symbol) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      if (news.source != null && news.source!.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).primaryColor.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(16),
+                            color: theme.colorScheme.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            symbol,
+                            news.source!,
                             style: TextStyle(
-                              color: Theme.of(context).primaryColor,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                        );
-                      }).toList(),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        formattedDate,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: theme.colorScheme.onBackground.withOpacity(0.6),
+                        ),
+                      ),
+                      if (news.author != null && news.author!.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '• ${news.author}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: theme.colorScheme.onBackground.withOpacity(0.6),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Description
+                  if (news.description != null && news.description!.isNotEmpty) ...[
+                    Text(
+                      news.description!,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onBackground,
+                      ),
                     ),
+                    const SizedBox(height: 16),
                   ],
-                  const SizedBox(height: 24),
-                  Text(
-                    news.description,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      height: 1.5,
+                  
+                  // Content
+                  if (news.content != null && news.content!.isNotEmpty)
+                    Text(
+                      news.content!,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: theme.colorScheme.onBackground.withOpacity(0.8),
+                        height: 1.5,
+                      ),
                     ),
-                  ),
+                  
                   const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: _openNewsUrl,
-                    icon: const Icon(Icons.open_in_browser),
-                    label: const Text('Read Full Article'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 50),
+                  
+                  // Read more button
+                  if (news.url != null && news.url!.isNotEmpty)
+                    Center(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _launchUrl(news.url!),
+                        icon: const Icon(Icons.open_in_browser),
+                        label: const Text('Read Full Article'),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

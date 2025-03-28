@@ -1,351 +1,296 @@
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
-import 'package:stockwise/models/stock.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:stockwise/models/stock.dart';
 
 class DatabaseService {
-  static final DatabaseService _instance = DatabaseService._internal();
-  static Database? _database;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  factory DatabaseService() {
-    return _instance;
-  }
-
-  DatabaseService._internal();
-
   // Get current user ID
   String? get currentUserId => _auth.currentUser?.uid;
-
+  
   // Check if user is logged in
   bool get isUserLoggedIn => _auth.currentUser != null;
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+  // Reference to user's watchlist collection
+  CollectionReference<Map<String, dynamic>> get _watchlistCollection {
+    if (!isUserLoggedIn) {
+      throw Exception('User not logged in');
+    }
+    return _firestore
+        .collection('users')
+        .doc(currentUserId)
+        .collection('watchlist');
   }
 
-  Future<Database> _initDatabase() async {
-    String path = join(await getDatabasesPath(), 'stockwise.db');
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _createDatabase,
-    );
-  }
+  // Add a stock to watchlist
+  Future<void> addToWatchlist(Stock stock) async {
+    if (!isUserLoggedIn) {
+      throw Exception('User not logged in');
+    }
 
-  Future<void> _createDatabase(Database db, int version) async {
-    // Create stock history table for offline access
-    await db.execute('''
-      CREATE TABLE stock_history(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT,
-        price REAL,
-        change REAL,
-        percent_change REAL,
-        volume INTEGER,
-        currency TEXT,
-        exchange TEXT,
-        last_updated TIMESTAMP,
-        UNIQUE(symbol, last_updated)
-      )
-    ''');
-  }
-
-  // Firestore Watchlist Operations
-  Future<void> addToWatchlist(String symbol, String name) async {
     try {
-      if (!isUserLoggedIn) {
-        // If user is not logged in, store in local database
-        await _addToLocalWatchlist(symbol, name);
-        return;
-      }
-
-      // Add to Firestore
-      await _firestore
-          .collection('users')
-          .doc(currentUserId)
-          .collection('watchlist')
-          .doc(symbol)
-          .set({
-        'symbol': symbol,
-        'name': name,
-        'added_at': FieldValue.serverTimestamp(),
+      await _watchlistCollection.doc(stock.symbol).set({
+        'symbol': stock.symbol,
+        'name': stock.name,
+        'price': stock.price,
+        'change': stock.change,
+        'changePercent': stock.changePercent,
+        'addedAt': FieldValue.serverTimestamp(),
+        'lastUpdated': stock.lastUpdated,
       });
     } catch (e) {
-      print('Error adding to watchlist: $e');
-      // Fallback to local storage if Firestore fails
-      await _addToLocalWatchlist(symbol, name);
+      throw Exception('Failed to add stock to watchlist: $e');
     }
   }
 
+  // Remove a stock from watchlist
   Future<void> removeFromWatchlist(String symbol) async {
-    try {
-      if (!isUserLoggedIn) {
-        // If user is not logged in, remove from local database
-        await _removeFromLocalWatchlist(symbol);
-        return;
-      }
+    if (!isUserLoggedIn) {
+      throw Exception('User not logged in');
+    }
 
-      // Remove from Firestore
-      await _firestore
-          .collection('users')
-          .doc(currentUserId)
-          .collection('watchlist')
-          .doc(symbol)
-          .delete();
+    try {
+      await _watchlistCollection.doc(symbol).delete();
     } catch (e) {
-      print('Error removing from watchlist: $e');
-      // Fallback to local storage if Firestore fails
-      await _removeFromLocalWatchlist(symbol);
+      throw Exception('Failed to remove stock from watchlist: $e');
     }
   }
 
+  // Check if a stock is in the watchlist
   Future<bool> isInWatchlist(String symbol) async {
-    try {
-      if (!isUserLoggedIn) {
-        // If user is not logged in, check local database
-        return await _isInLocalWatchlist(symbol);
-      }
+    if (!isUserLoggedIn) {
+      return false;
+    }
 
-      // Check Firestore
-      final doc = await _firestore
-          .collection('users')
-          .doc(currentUserId)
-          .collection('watchlist')
-          .doc(symbol)
-          .get();
-          
+    try {
+      final doc = await _watchlistCollection.doc(symbol).get();
       return doc.exists;
     } catch (e) {
       print('Error checking watchlist: $e');
-      // Fallback to local storage if Firestore fails
-      return await _isInLocalWatchlist(symbol);
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getWatchlist() async {
-    try {
-      if (!isUserLoggedIn) {
-        // If user is not logged in, get from local database
-        return await _getLocalWatchlist();
-      }
-
-      // Get from Firestore
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(currentUserId)
-          .collection('watchlist')
-          .orderBy('added_at', descending: true)
-          .get();
-          
-      return snapshot.docs.map((doc) => {
-        'symbol': doc.data()['symbol'] as String,
-        'name': doc.data()['name'] as String,
-        'added_at': doc.data()['added_at'] ?? Timestamp.now(),
-      }).toList();
-    } catch (e) {
-      print('Error getting watchlist: $e');
-      // Fallback to local storage if Firestore fails
-      return await _getLocalWatchlist();
-    }
-  }
-
-  // Sync local watchlist with Firestore when user logs in
-  Future<void> syncWatchlistToFirestore() async {
-    if (!isUserLoggedIn) return;
-
-    try {
-      // Get local watchlist
-      final localWatchlist = await _getLocalWatchlist();
-      
-      // Add each item to Firestore
-      for (var item in localWatchlist) {
-        await _firestore
-            .collection('users')
-            .doc(currentUserId)
-            .collection('watchlist')
-            .doc(item['symbol'] as String)
-            .set({
-          'symbol': item['symbol'],
-          'name': item['name'],
-          'added_at': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      }
-    } catch (e) {
-      print('Error syncing watchlist to Firestore: $e');
-    }
-  }
-
-  // New method to sync local watchlist to Firestore
-  Future<void> syncWatchlistToFirestore() async {
-    if (!isUserLoggedIn) return;
-    
-    try {
-      final localWatchlist = await _getLocalWatchlist();
-      
-      // Skip if local watchlist is empty
-      if (localWatchlist.isEmpty) return;
-      
-      // Get batch for efficient writes
-      final batch = _firestore.batch();
-      final userWatchlistRef = _firestore.collection('users').doc(currentUserId).collection('watchlist');
-      
-      // Add each local watchlist item to Firestore
-      for (var item in localWatchlist) {
-        final symbol = item['symbol'] as String;
-        final name = item['name'] as String;
-        
-        // Check if already exists in Firestore
-        final docSnapshot = await userWatchlistRef.doc(symbol).get();
-        if (!docSnapshot.exists) {
-          batch.set(userWatchlistRef.doc(symbol), {
-            'symbol': symbol,
-            'name': name,
-            'added_at': FieldValue.serverTimestamp(),
-            'synced_from_local': true,
-          });
-        }
-      }
-      
-      // Commit the batch
-      await batch.commit();
-      
-      print('Successfully synced local watchlist to Firestore');
-    } catch (e) {
-      print('Error syncing watchlist to Firestore: $e');
-    }
-  }
-
-  // Local SQLite Watchlist Operations (fallback)
-  Future<int> _addToLocalWatchlist(String symbol, String name) async {
-    final db = await database;
-    
-    // Create watchlist table if it doesn't exist
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS watchlist(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT UNIQUE,
-        name TEXT,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    ''');
-    
-    return await db.insert(
-      'watchlist',
-      {'symbol': symbol, 'name': name},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  Future<int> _removeFromLocalWatchlist(String symbol) async {
-    final db = await database;
-    return await db.delete(
-      'watchlist',
-      where: 'symbol = ?',
-      whereArgs: [symbol],
-    );
-  }
-
-  Future<bool> _isInLocalWatchlist(String symbol) async {
-    final db = await database;
-    
-    try {
-      // Check if watchlist table exists
-      final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='watchlist'"
-      );
-      
-      if (tables.isEmpty) {
-        return false;
-      }
-      
-      final result = await db.query(
-        'watchlist',
-        where: 'symbol = ?',
-        whereArgs: [symbol],
-      );
-      return result.isNotEmpty;
-    } catch (e) {
-      print('Error checking local watchlist: $e');
       return false;
     }
   }
 
-  Future<List<Map<String, dynamic>>> _getLocalWatchlist() async {
-    final db = await database;
-    
+  // Get all stocks in watchlist
+  Stream<List<Stock>> getWatchlistStream() {
+    if (!isUserLoggedIn) {
+      return Stream.value([]);
+    }
+
+    return _watchlistCollection.snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Stock(
+          symbol: data['symbol'] ?? '',
+          name: data['name'] ?? '',
+          price: (data['price'] ?? 0).toDouble(),
+          change: (data['change'] ?? 0).toDouble(),
+          changePercent: (data['changePercent'] ?? 0).toDouble(),
+          high: 0,
+          low: 0,
+          open: 0,
+          previousClose: 0,
+          volume: 0,
+          lastUpdated: data['lastUpdated'] ?? '',
+        );
+      }).toList();
+    });
+  }
+
+  // Get all stocks in watchlist as a future
+  Future<List<Stock>> getWatchlist() async {
+    if (!isUserLoggedIn) {
+      return [];
+    }
+
     try {
-      // Check if watchlist table exists
-      final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='watchlist'"
-      );
-      
-      if (tables.isEmpty) {
-        return [];
-      }
-      
-      return await db.query('watchlist', orderBy: 'added_at DESC');
+      final snapshot = await _watchlistCollection.get();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Stock(
+          symbol: data['symbol'] ?? '',
+          name: data['name'] ?? '',
+          price: (data['price'] ?? 0).toDouble(),
+          change: (data['change'] ?? 0).toDouble(),
+          changePercent: (data['changePercent'] ?? 0).toDouble(),
+          high: 0,
+          low: 0,
+          open: 0,
+          previousClose: 0,
+          volume: 0,
+          lastUpdated: data['lastUpdated'] ?? '',
+        );
+      }).toList();
     } catch (e) {
-      print('Error getting local watchlist: $e');
+      print('Error getting watchlist: $e');
       return [];
     }
   }
 
-  // Stock history operations
-  Future<int> saveStockData(Stock stock) async {
-    final db = await database;
-    return await db.insert(
-      'stock_history',
-      {
-        'symbol': stock.symbol,
-        'price': stock.price,
-        'change': stock.change,
-        'percent_change': stock.percentChange,
-        'volume': stock.volume,
-        'currency': stock.currency,
-        'exchange': stock.exchange,
-        'last_updated': stock.lastUpdated.toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
+  // Update stock price in watchlist
+  Future<void> updateStockPrice(String symbol, double price, double change, double changePercent, String lastUpdated) async {
+    if (!isUserLoggedIn) {
+      return;
+    }
 
-  Future<List<Stock>> getStockHistory(String symbol, {int limit = 30}) async {
-    final db = await database;
-    final result = await db.query(
-      'stock_history',
-      where: 'symbol = ?',
-      whereArgs: [symbol],
-      orderBy: 'last_updated DESC',
-      limit: limit,
-    );
-
-    return result.map((data) => Stock(
-      symbol: data['symbol'] as String,
-      name: '', // Name is not stored in history
-      price: data['price'] as double,
-      change: data['change'] as double,
-      percentChange: data['percent_change'] as double,
-      volume: data['volume'] as int,
-      currency: data['currency'] as String,
-      exchange: data['exchange'] as String,
-      lastUpdated: DateTime.parse(data['last_updated'] as String),
-    )).toList();
-  }
-
-  // Clear all data
-  Future<void> clearAllData() async {
-    final db = await database;
-    await db.delete('stock_history');
-    
     try {
-      await db.delete('watchlist');
+      await _watchlistCollection.doc(symbol).update({
+        'price': price,
+        'change': change,
+        'changePercent': changePercent,
+        'lastUpdated': lastUpdated,
+      });
     } catch (e) {
-      print('Error clearing watchlist: $e');
+      print('Error updating stock price: $e');
+    }
+  }
+
+  // Get user search history
+  Future<List<String>> getSearchHistory() async {
+    if (!isUserLoggedIn) {
+      return [];
+    }
+
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('preferences')
+          .doc('searchHistory')
+          .get();
+
+      if (!doc.exists) {
+        return [];
+      }
+
+      final data = doc.data();
+      if (data == null || !data.containsKey('history')) {
+        return [];
+      }
+
+      return List<String>.from(data['history']);
+    } catch (e) {
+      print('Error getting search history: $e');
+      return [];
+    }
+  }
+
+  // Add to search history
+  Future<void> addToSearchHistory(String query) async {
+    if (!isUserLoggedIn || query.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final history = await getSearchHistory();
+      
+      // Remove if already exists to avoid duplicates
+      history.remove(query);
+      
+      // Add to the beginning
+      history.insert(0, query);
+      
+      // Limit to 10 items
+      if (history.length > 10) {
+        history.removeLast();
+      }
+
+      await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('preferences')
+          .doc('searchHistory')
+          .set({
+        'history': history,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error adding to search history: $e');
+    }
+  }
+
+  // Clear search history
+  Future<void> clearSearchHistory() async {
+    if (!isUserLoggedIn) {
+      return;
+    }
+
+    try {
+      await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('preferences')
+          .doc('searchHistory')
+          .set({
+        'history': [],
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error clearing search history: $e');
+    }
+  }
+
+  // Save user preferences
+  Future<void> saveUserPreferences({
+    required bool darkMode,
+    required String defaultCurrency,
+  }) async {
+    if (!isUserLoggedIn) {
+      return;
+    }
+
+    try {
+      await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('preferences')
+          .doc('settings')
+          .set({
+        'darkMode': darkMode,
+        'defaultCurrency': defaultCurrency,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error saving user preferences: $e');
+    }
+  }
+
+  // Get user preferences
+  Future<Map<String, dynamic>> getUserPreferences() async {
+    if (!isUserLoggedIn) {
+      return {
+        'darkMode': false,
+        'defaultCurrency': 'USD',
+      };
+    }
+
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('preferences')
+          .doc('settings')
+          .get();
+
+      if (!doc.exists) {
+        return {
+          'darkMode': false,
+          'defaultCurrency': 'USD',
+        };
+      }
+
+      final data = doc.data();
+      return {
+        'darkMode': data?['darkMode'] ?? false,
+        'defaultCurrency': data?['defaultCurrency'] ?? 'USD',
+      };
+    } catch (e) {
+      print('Error getting user preferences: $e');
+      return {
+        'darkMode': false,
+        'defaultCurrency': 'USD',
+      };
     }
   }
 }

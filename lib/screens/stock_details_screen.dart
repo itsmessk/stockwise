@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:stockwise/models/stock.dart';
 import 'package:stockwise/models/company_profile.dart';
 import 'package:stockwise/models/historical_data.dart';
+import 'package:stockwise/models/news.dart';
 import 'package:stockwise/services/api_service.dart';
 import 'package:stockwise/services/database_service.dart';
-import 'package:stockwise/utils/stock_utils.dart';
-import 'package:stockwise/widgets/stock_chart.dart';
+import 'package:stockwise/widgets/news_card.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:intl/intl.dart';
 
@@ -21,512 +22,745 @@ class StockDetailsScreen extends StatefulWidget {
   State<StockDetailsScreen> createState() => _StockDetailsScreenState();
 }
 
-class _StockDetailsScreenState extends State<StockDetailsScreen> {
+class _StockDetailsScreenState extends State<StockDetailsScreen> with SingleTickerProviderStateMixin {
   final ApiService _apiService = ApiService();
   final DatabaseService _databaseService = DatabaseService();
-
+  
+  late TabController _tabController;
+  
+  bool _isLoading = true;
+  bool _isFavorite = false;
+  String _errorMessage = '';
+  
   Stock? _stock;
   CompanyProfile? _companyProfile;
-  List<HistoricalData> _historicalData = [];
-  bool _isInWatchlist = false;
+  HistoricalDataList? _historicalData;
+  List<NewsArticle> _news = [];
   
-  bool _isLoadingStock = true;
-  bool _isLoadingProfile = true;
-  bool _isLoadingHistoricalData = true;
+  String _selectedTimeRange = '1D'; // 1D, 1W, 1M, 3M, 1Y, 5Y
   
-  String _selectedTimeRange = '1M'; // Default to 1 month
-
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     _loadData();
   }
 
-  Future<void> _loadData() async {
-    _loadStock();
-    _loadCompanyProfile();
-    _loadHistoricalData();
-    _checkWatchlistStatus();
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
-  Future<void> _loadStock() async {
+  Future<void> _loadData() async {
     setState(() {
-      _isLoadingStock = true;
+      _isLoading = true;
+      _errorMessage = '';
     });
 
     try {
-      final stocks = await _apiService.fetchLiveStockPrices([widget.symbol]);
+      // Check if stock is in favorites
+      _isFavorite = await _databaseService.isInWatchlist(widget.symbol);
       
-      if (stocks.isNotEmpty) {
-        setState(() {
-          _stock = stocks.first;
-          _isLoadingStock = false;
-        });
-        
-        // Save to local database
-        await _databaseService.saveStockData(_stock!);
-      } else {
-        setState(() {
-          _isLoadingStock = false;
-        });
-        _showErrorSnackBar('Stock data not found');
-      }
+      // Load stock data in parallel
+      await Future.wait([
+        _loadStockQuote(),
+        _loadCompanyProfile(),
+        _loadHistoricalData(),
+        _loadStockNews(),
+      ]);
+      
+      setState(() {
+        _isLoading = false;
+      });
     } catch (e) {
       setState(() {
-        _isLoadingStock = false;
+        _errorMessage = 'Failed to load stock data: $e';
+        _isLoading = false;
       });
-      _showErrorSnackBar('Failed to load stock data: $e');
+    }
+  }
+
+  Future<void> _loadStockQuote() async {
+    try {
+      final stock = await _apiService.getStockQuote(widget.symbol);
+      setState(() {
+        _stock = stock;
+      });
+    } catch (e) {
+      throw Exception('Failed to load stock quote: $e');
     }
   }
 
   Future<void> _loadCompanyProfile() async {
-    setState(() {
-      _isLoadingProfile = true;
-    });
-
     try {
-      final profile = await _apiService.fetchCompanyProfile(widget.symbol);
-      
+      final profile = await _apiService.getCompanyProfile(widget.symbol);
       setState(() {
         _companyProfile = profile;
-        _isLoadingProfile = false;
       });
     } catch (e) {
-      setState(() {
-        _isLoadingProfile = false;
-      });
-      _showErrorSnackBar('Failed to load company profile: $e');
+      // Company profile is optional, so we don't throw an exception
+      print('Failed to load company profile: $e');
     }
   }
 
   Future<void> _loadHistoricalData() async {
-    setState(() {
-      _isLoadingHistoricalData = true;
-    });
-
     try {
-      final dateFrom = _getDateFromForRange();
-      final data = await _apiService.fetchHistoricalData(
+      final isDaily = _selectedTimeRange != '1D';
+      final historicalData = await _apiService.getHistoricalData(
         widget.symbol,
-        DateFormat('yyyy-MM-dd').format(dateFrom),
+        isDaily: isDaily,
       );
-      
       setState(() {
-        _historicalData = data;
-        _isLoadingHistoricalData = false;
+        _historicalData = historicalData;
       });
     } catch (e) {
-      setState(() {
-        _isLoadingHistoricalData = false;
-      });
-      _showErrorSnackBar('Failed to load historical data: $e');
+      throw Exception('Failed to load historical data: $e');
     }
   }
 
-  Future<void> _checkWatchlistStatus() async {
+  Future<void> _loadStockNews() async {
     try {
-      final isInWatchlist = await _databaseService.isInWatchlist(widget.symbol);
-      
+      final newsResponse = await _apiService.getMarketNews(
+        tickers: widget.symbol,
+        limit: 5,
+      );
       setState(() {
-        _isInWatchlist = isInWatchlist;
+        _news = newsResponse.articles;
       });
     } catch (e) {
-      _showErrorSnackBar('Failed to check watchlist status: $e');
+      // News is optional, so we don't throw an exception
+      print('Failed to load news: $e');
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-
-  DateTime _getDateFromForRange() {
-    final now = DateTime.now();
-    
-    switch (_selectedTimeRange) {
-      case '1D':
-        return now.subtract(const Duration(days: 1));
-      case '1W':
-        return now.subtract(const Duration(days: 7));
-      case '1M':
-        return now.subtract(const Duration(days: 30));
-      case '3M':
-        return now.subtract(const Duration(days: 90));
-      case '6M':
-        return now.subtract(const Duration(days: 180));
-      case '1Y':
-        return now.subtract(const Duration(days: 365));
-      case '5Y':
-        return now.subtract(const Duration(days: 365 * 5));
-      default:
-        return now.subtract(const Duration(days: 30));
-    }
-  }
-
-  Future<void> _toggleWatchlist() async {
+  Future<void> _toggleFavorite() async {
     try {
       if (_stock == null) return;
       
-      if (_isInWatchlist) {
-        await _databaseService.removeFromWatchlist(widget.symbol);
-        setState(() {
-          _isInWatchlist = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${widget.symbol} removed from watchlist'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+      setState(() {
+        _isFavorite = !_isFavorite;
+      });
+      
+      if (_isFavorite) {
+        await _databaseService.addToWatchlist(_stock!);
       } else {
-        await _databaseService.addToWatchlist(widget.symbol, _stock!.name);
-        setState(() {
-          _isInWatchlist = true;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${widget.symbol} added to watchlist'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        await _databaseService.removeFromWatchlist(widget.symbol);
       }
     } catch (e) {
-      _showErrorSnackBar('Failed to update watchlist: $e');
+      // Revert the state if there's an error
+      setState(() {
+        _isFavorite = !_isFavorite;
+        _errorMessage = 'Failed to update favorites: $e';
+      });
     }
   }
 
-  void _onTimeRangeChanged(String range) {
+  void _changeTimeRange(String range) {
+    if (_selectedTimeRange == range) return;
+    
     setState(() {
       _selectedTimeRange = range;
     });
+    
     _loadHistoricalData();
+  }
+
+  void _navigateToNewsDetails(NewsArticle news) {
+    Navigator.pushNamed(
+      context,
+      '/news_details',
+      arguments: {'news': news},
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.symbol),
         actions: [
-          IconButton(
-            icon: Icon(
-              _isInWatchlist ? Icons.star : Icons.star_border,
-              color: _isInWatchlist ? Colors.amber : null,
+          if (!_isLoading && _stock != null)
+            IconButton(
+              icon: Icon(
+                _isFavorite ? Icons.star : Icons.star_border,
+                color: _isFavorite ? Colors.amber : null,
+              ),
+              onPressed: _toggleFavorite,
             ),
-            onPressed: _toggleWatchlist,
-          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: _isLoading
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SpinKitWave(
+                    color: theme.colorScheme.primary,
+                    size: 50.0,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Loading stock data...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: theme.colorScheme.onBackground,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : _errorMessage.isNotEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: theme.colorScheme.error,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Something went wrong',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.onBackground,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          _errorMessage,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: theme.colorScheme.onBackground.withOpacity(0.7),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: _loadData,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Try Again'),
+                      ),
+                    ],
+                  ),
+                )
+              : _stock == null
+                  ? Center(
+                      child: Text(
+                        'No data available for ${widget.symbol}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: theme.colorScheme.onBackground,
+                        ),
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _loadData,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Stock price header
+                            _buildStockHeader(),
+                            
+                            // Price chart
+                            _buildPriceChart(),
+                            
+                            // Tab bar
+                            TabBar(
+                              controller: _tabController,
+                              tabs: const [
+                                Tab(text: 'Overview'),
+                                Tab(text: 'Details'),
+                                Tab(text: 'News'),
+                              ],
+                            ),
+                            
+                            // Tab content
+                            SizedBox(
+                              height: 500, // Fixed height for tab content
+                              child: TabBarView(
+                                controller: _tabController,
+                                children: [
+                                  // Overview tab
+                                  _buildOverviewTab(),
+                                  
+                                  // Details tab
+                                  _buildDetailsTab(),
+                                  
+                                  // News tab
+                                  _buildNewsTab(),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+    );
+  }
+
+  Widget _buildStockHeader() {
+    final theme = Theme.of(context);
+    final isPositive = _stock!.change >= 0;
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: theme.colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Company name
+          Text(
+            _stock!.name,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onBackground,
+            ),
+          ),
+          const SizedBox(height: 8),
+          
+          // Price
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '\$${_stock!.price.toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.onBackground,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Row(
+                children: [
+                  Icon(
+                    isPositive ? Icons.arrow_upward : Icons.arrow_downward,
+                    size: 16,
+                    color: isPositive ? Colors.green : Colors.red,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${isPositive ? '+' : ''}${_stock!.change.toStringAsFixed(2)} (${_stock!.changePercent.toStringAsFixed(2)}%)',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: isPositive ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          
+          // Last updated
+          Text(
+            'Last updated: ${_stock!.lastUpdated}',
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onBackground.withOpacity(0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceChart() {
+    final theme = Theme.of(context);
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      height: 300,
+      child: Column(
+        children: [
+          // Time range selector
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildTimeRangeButton('1D'),
+              _buildTimeRangeButton('1W'),
+              _buildTimeRangeButton('1M'),
+              _buildTimeRangeButton('3M'),
+              _buildTimeRangeButton('1Y'),
+              _buildTimeRangeButton('5Y'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // Chart
+          Expanded(
+            child: _historicalData == null || _historicalData!.timeSeriesData.isEmpty
+                ? Center(
+                    child: Text(
+                      'No historical data available',
+                      style: TextStyle(
+                        color: theme.colorScheme.onBackground.withOpacity(0.7),
+                      ),
+                    ),
+                  )
+                : LineChart(
+                    LineChartData(
+                      gridData: FlGridData(show: false),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        rightTitles: AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              if (value.toInt() >= _historicalData!.timeSeriesData.length || value.toInt() < 0) {
+                                return const SizedBox.shrink();
+                              }
+                              
+                              // Only show a few dates
+                              if (value.toInt() % (_historicalData!.timeSeriesData.length ~/ 5) != 0) {
+                                return const SizedBox.shrink();
+                              }
+                              
+                              final date = _historicalData!.timeSeriesData[value.toInt()].date;
+                              return Text(
+                                DateFormat.MMMd().format(DateTime.parse(date)),
+                                style: TextStyle(
+                                  color: theme.colorScheme.onBackground.withOpacity(0.7),
+                                  fontSize: 10,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: List.generate(
+                            _historicalData!.timeSeriesData.length,
+                            (index) => FlSpot(
+                              index.toDouble(),
+                              _historicalData!.timeSeriesData[index].close,
+                            ),
+                          ),
+                          isCurved: true,
+                          color: theme.colorScheme.primary,
+                          barWidth: 2,
+                          isStrokeCapRound: true,
+                          dotData: FlDotData(show: false),
+                          belowBarData: BarAreaData(
+                            show: true,
+                            color: theme.colorScheme.primary.withOpacity(0.1),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeRangeButton(String range) {
+    final theme = Theme.of(context);
+    final isSelected = _selectedTimeRange == range;
+    
+    return InkWell(
+      onTap: () => _changeTimeRange(range),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? theme.colorScheme.primary
+              : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outline.withOpacity(0.5),
+          ),
+        ),
+        child: Text(
+          range,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected
+                ? theme.colorScheme.onPrimary
+                : theme.colorScheme.onBackground,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOverviewTab() {
+    final theme = Theme.of(context);
+    
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Company description
+          if (_companyProfile != null && _companyProfile!.description.isNotEmpty) ...[
+            Text(
+              'About ${_stock!.name}',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onBackground,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _companyProfile!.description,
+              style: TextStyle(
+                fontSize: 14,
+                color: theme.colorScheme.onBackground.withOpacity(0.8),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+          
+          // Key statistics
+          Text(
+            'Key Statistics',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onBackground,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildKeyStatisticsGrid(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKeyStatisticsGrid() {
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 2.5,
+      children: [
+        _buildStatItem('Open', '\$${_stock!.open.toStringAsFixed(2)}'),
+        _buildStatItem('Previous Close', '\$${_stock!.previousClose.toStringAsFixed(2)}'),
+        _buildStatItem('High', '\$${_stock!.high.toStringAsFixed(2)}'),
+        _buildStatItem('Low', '\$${_stock!.low.toStringAsFixed(2)}'),
+        _buildStatItem('Volume', NumberFormat.compact().format(_stock!.volume)),
+        if (_companyProfile != null) ...[
+          _buildStatItem('Market Cap', _companyProfile!.marketCap),
+          _buildStatItem('P/E Ratio', _companyProfile!.peRatio),
+          _buildStatItem('Dividend Yield', _companyProfile!.dividendYield),
+          _buildStatItem('52-Week High', _companyProfile!.weekHigh52),
+          _buildStatItem('52-Week Low', _companyProfile!.weekLow52),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStatItem(String label, String value) {
+    final theme = Theme.of(context);
+    
+    return Card(
+      elevation: 0,
+      color: theme.colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildStockHeader(),
-            _buildChart(),
-            _buildCompanyProfile(),
-            const SizedBox(height: 20),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onBackground.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onBackground,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStockHeader() {
-    if (_isLoadingStock) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: SpinKitWave(
-            color: Colors.blue,
-            size: 30.0,
-          ),
-        ),
-      );
-    }
-
-    if (_stock == null) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text('Stock data not available'),
-        ),
-      );
-    }
-
-    return Container(
+  Widget _buildDetailsTab() {
+    final theme = Theme.of(context);
+    
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _stock!.name,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    '${_stock!.exchange}: ${_stock!.symbol}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
-                    ),
-                  ),
-                ],
+          if (_companyProfile != null) ...[
+            // Company information
+            Text(
+              'Company Information',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onBackground,
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    StockUtils.formatPrice(_stock!.price, _stock!.currency),
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Icon(
-                        StockUtils.getPriceChangeIcon(_stock!.change),
-                        color: StockUtils.getPriceChangeColor(_stock!.change),
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${_stock!.change.toStringAsFixed(2)} (${StockUtils.formatPercentageChange(_stock!.percentChange)})',
-                        style: TextStyle(
-                          color: StockUtils.getPriceChangeColor(_stock!.change),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+            ),
+            const SizedBox(height: 16),
+            _buildInfoItem('Sector', _companyProfile!.sector),
+            _buildInfoItem('Industry', _companyProfile!.industry),
+            _buildInfoItem('Exchange', _companyProfile!.exchange),
+            _buildInfoItem('Currency', _companyProfile!.currency),
+            _buildInfoItem('Country', _companyProfile!.country),
+            _buildInfoItem('Address', _companyProfile!.address),
+            _buildInfoItem('Website', _companyProfile!.website),
+            
+            const SizedBox(height: 24),
+            
+            // Financial information
+            Text(
+              'Financial Information',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onBackground,
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildInfoItem('Volume', StockUtils.formatLargeNumber(_stock!.volume)),
-              _buildInfoItem('Currency', _stock!.currency),
-              _buildInfoItem('Last Updated', _formatLastUpdated(_stock!.lastUpdated)),
-            ],
-          ),
+            ),
+            const SizedBox(height: 16),
+            _buildInfoItem('Earnings Per Share (EPS)', _companyProfile!.eps),
+            _buildInfoItem('Revenue', _companyProfile!.revenue),
+            _buildInfoItem('Gross Profit', _companyProfile!.grossProfit),
+            _buildInfoItem('EBITDA', _companyProfile!.ebitda),
+            _buildInfoItem('Profit Margin', _companyProfile!.profitMargin),
+            _buildInfoItem('Beta', _companyProfile!.beta),
+          ] else
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 48,
+                      color: theme.colorScheme.onBackground.withOpacity(0.3),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No detailed information available',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: theme.colorScheme.onBackground.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildInfoItem(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildChart() {
-    if (_isLoadingHistoricalData) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: SpinKitWave(
-            color: Colors.blue,
-            size: 30.0,
-          ),
-        ),
-      );
-    }
-
-    if (_historicalData.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text('Historical data not available'),
-        ),
-      );
-    }
-
-    return StockChart(
-      data: _historicalData,
-      timeRange: _selectedTimeRange,
-      onTimeRangeChanged: _onTimeRangeChanged,
-    );
-  }
-
-  Widget _buildCompanyProfile() {
-    if (_isLoadingProfile) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: SpinKitWave(
-            color: Colors.blue,
-            size: 30.0,
-          ),
-        ),
-      );
-    }
-
-    if (_companyProfile == null) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text('Company profile not available'),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Company Profile',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_companyProfile!.logoUrl.isNotEmpty)
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 16.0),
-                        child: Image.network(
-                          _companyProfile!.logoUrl,
-                          height: 60,
-                          errorBuilder: (context, error, stackTrace) {
-                            return const SizedBox(
-                              height: 60,
-                              child: Icon(
-                                Icons.business,
-                                size: 60,
-                                color: Colors.grey,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  _buildProfileItem('Industry', _companyProfile!.industry),
-                  _buildProfileItem('Sector', _companyProfile!.sector),
-                  _buildProfileItem('CEO', _companyProfile!.ceo),
-                  _buildProfileItem('Employees', _companyProfile!.employees.toString()),
-                  _buildProfileItem('Website', _companyProfile!.website),
-                  _buildProfileItem('Market Cap', StockUtils.formatLargeNumber(_companyProfile!.marketCap)),
-                  _buildProfileItem('Address', _getFullAddress()),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Description',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _companyProfile!.description,
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.8),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileItem(String label, String value) {
+    final theme = Theme.of(context);
+    
     if (value.isEmpty) return const SizedBox.shrink();
     
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100,
+            width: 120,
             child: Text(
-              '$label:',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: theme.colorScheme.onBackground.withOpacity(0.7),
               ),
             ),
           ),
           Expanded(
-            child: Text(value),
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                color: theme.colorScheme.onBackground,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  String _getFullAddress() {
-    if (_companyProfile == null) return '';
+  Widget _buildNewsTab() {
+    final theme = Theme.of(context);
     
-    final parts = [
-      _companyProfile!.address,
-      _companyProfile!.city,
-      _companyProfile!.state,
-      _companyProfile!.zip,
-      _companyProfile!.country,
-    ].where((part) => part.isNotEmpty).toList();
-    
-    return parts.join(', ');
-  }
-
-  String _formatLastUpdated(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inDays > 0) {
-      return '${difference.inDays}d ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes}m ago';
-    } else {
-      return 'Just now';
-    }
+    return _news.isEmpty
+        ? Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.newspaper,
+                  size: 48,
+                  color: theme.colorScheme.onBackground.withOpacity(0.3),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'No news available',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: theme.colorScheme.onBackground.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+          )
+        : ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: _news.length,
+            itemBuilder: (context, index) {
+              final article = _news[index];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: NewsCard(
+                  article: article,
+                  onTap: () => _navigateToNewsDetails(article),
+                ),
+              );
+            },
+          );
   }
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:stockwise/services/auth_service.dart';
-import 'package:stockwise/services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:stockwise/services/auth_service.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -13,7 +12,6 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final AuthService _authService = AuthService();
-  final DatabaseService _databaseService = DatabaseService();
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -46,44 +44,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _passwordController.text.trim(),
       );
       
-      // Sync local favorites to Firestore
-      await _databaseService.syncWatchlistToFirestore();
-      
-      // Navigate to home screen
+      // Navigate to home screen on successful registration
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
+        Navigator.pushReplacementNamed(context, '/home');
       }
     } on FirebaseAuthException catch (e) {
-      String message;
-      
-      switch (e.code) {
-        case 'email-already-in-use':
-          message = 'The email address is already in use.';
-          break;
-        case 'invalid-email':
-          message = 'The email address is not valid.';
-          break;
-        case 'operation-not-allowed':
-          message = 'Email/password accounts are not enabled.';
-          break;
-        case 'weak-password':
-          message = 'The password is too weak.';
-          break;
-        default:
-          message = 'An error occurred: ${e.message}';
-      }
-      
-      if (mounted) {
-        setState(() {
-          _errorMessage = message;
-        });
-      }
+      setState(() {
+        _errorMessage = e.message ?? 'An error occurred during registration';
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'An error occurred: $e';
-        });
-      }
+      setState(() {
+        _errorMessage = e.toString();
+      });
     } finally {
       if (mounted) {
         setState(() {
@@ -102,17 +74,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       await _authService.signInWithGoogle();
       
-      // Sync local favorites to Firestore
-      await _databaseService.syncWatchlistToFirestore();
-      
-      // Navigate to home screen
+      // Navigate to home screen on successful login
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
+        Navigator.pushReplacementNamed(context, '/home');
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Failed to sign in with Google: $e';
+          _errorMessage = e.toString();
         });
       }
     } finally {
@@ -122,6 +91,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
       }
     }
+  }
+
+  void _navigateToLogin() {
+    Navigator.pop(context);
   }
 
   @override
@@ -377,9 +350,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ),
                         TextButton(
-                          onPressed: () {
-                            Navigator.pushReplacementNamed(context, '/login');
-                          },
+                          onPressed: _navigateToLogin,
                           child: const Text('Sign In'),
                         ),
                       ],
