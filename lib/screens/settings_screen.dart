@@ -4,6 +4,8 @@ import 'package:stockwise/services/theme_service.dart';
 import 'package:stockwise/services/preferences_service.dart';
 import 'package:stockwise/constants/theme_constants.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:stockwise/services/api_service.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -14,6 +16,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final PreferencesService _preferencesService = PreferencesService();
+  final ApiService _apiService = ApiService();
   
   bool _isLoading = true;
   bool _isDarkMode = false;
@@ -34,10 +37,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       
       final prefs = await _preferencesService.getUserPreferences();
       
+      // Get API key from .env or ApiService
+      String apiKey = '';
+      try {
+        apiKey = _apiService.getApiKey();
+      } catch (e) {
+        print('Error getting API key: $e');
+        apiKey = 'demo';
+      }
+      
       setState(() {
         _isDarkMode = prefs.darkMode;
         _defaultCurrency = prefs.defaultCurrency;
-        _apiKey = prefs.apiKey;
+        _apiKey = apiKey;
         _isLoading = false;
       });
     } catch (e) {
@@ -74,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _updateCurrency(String currency) async {
     try {
-      await _preferencesService.updateDefaultCurrency(currency);
+      await _preferencesService.updateCurrency(currency);
       setState(() {
         _defaultCurrency = currency;
       });
@@ -92,14 +104,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _updateApiKey(String apiKey) async {
     try {
-      await _preferencesService.updateApiKey(apiKey);
+      // Save to .env file or a secure storage
+      // This is a simplified implementation
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('API key update functionality is not implemented yet'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      
       setState(() {
         _apiKey = apiKey;
       });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('API key updated successfully')),
-      );
     } catch (e) {
       print('Error updating API key: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -113,10 +129,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final theme = Theme.of(context);
     
     if (_isLoading) {
-      return Center(
-        child: SpinKitCircle(
-          color: theme.primaryColor,
-          size: 50.0,
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Settings'),
+          backgroundColor: theme.primaryColor,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: SpinKitCircle(
+            color: theme.primaryColor,
+            size: 50.0,
+          ),
         ),
       );
     }
