@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class ThemeConstants {
   // Light Theme Colors
@@ -24,7 +25,7 @@ class ThemeConstants {
   static const Color negativeColorDark = Color(0xFFEF5350);
 
   // Text Styles
-  static const String fontFamily = 'Poppins';
+  // Removed the fontFamily constant as it's no longer needed
 
   // Light Theme
   static final ThemeData lightTheme = ThemeData(
@@ -34,7 +35,47 @@ class ThemeConstants {
     scaffoldBackgroundColor: backgroundColorLight,
     cardColor: cardColorLight,
     dividerColor: dividerColorLight,
-    fontFamily: fontFamily,
+    textTheme: GoogleFonts.poppinsTextTheme(
+      const TextTheme(
+        displayLarge: TextStyle(
+          fontSize: 28,
+          fontWeight: FontWeight.bold,
+          color: textColorLight,
+        ),
+        displayMedium: TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: textColorLight,
+        ),
+        displaySmall: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: textColorLight,
+        ),
+        headlineMedium: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: textColorLight,
+        ),
+        titleLarge: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: textColorLight,
+        ),
+        bodyLarge: TextStyle(
+          fontSize: 16,
+          color: textColorLight,
+        ),
+        bodyMedium: TextStyle(
+          fontSize: 14,
+          color: textColorLight,
+        ),
+        bodySmall: TextStyle(
+          fontSize: 12,
+          color: secondaryTextColorLight,
+        ),
+      ),
+    ),
     colorScheme: const ColorScheme.light(
       primary: primaryColorLight,
       secondary: secondaryColorLight,
@@ -44,45 +85,6 @@ class ThemeConstants {
       surface: cardColorLight,
       onBackground: textColorLight,
       onSurface: textColorLight,
-    ),
-    textTheme: const TextTheme(
-      displayLarge: TextStyle(
-        fontSize: 28,
-        fontWeight: FontWeight.bold,
-        color: textColorLight,
-      ),
-      displayMedium: TextStyle(
-        fontSize: 24,
-        fontWeight: FontWeight.bold,
-        color: textColorLight,
-      ),
-      displaySmall: TextStyle(
-        fontSize: 20,
-        fontWeight: FontWeight.bold,
-        color: textColorLight,
-      ),
-      headlineMedium: TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: textColorLight,
-      ),
-      titleLarge: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        color: textColorLight,
-      ),
-      bodyLarge: TextStyle(
-        fontSize: 16,
-        color: textColorLight,
-      ),
-      bodyMedium: TextStyle(
-        fontSize: 14,
-        color: textColorLight,
-      ),
-      bodySmall: TextStyle(
-        fontSize: 12,
-        color: secondaryTextColorLight,
-      ),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: primaryColorLight,
@@ -152,7 +154,47 @@ class ThemeConstants {
     scaffoldBackgroundColor: backgroundColorDark,
     cardColor: cardColorDark,
     dividerColor: dividerColorDark,
-    fontFamily: fontFamily,
+    textTheme: GoogleFonts.poppinsTextTheme(
+      const TextTheme(
+        displayLarge: TextStyle(
+          fontSize: 28,
+          fontWeight: FontWeight.bold,
+          color: textColorDark,
+        ),
+        displayMedium: TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: textColorDark,
+        ),
+        displaySmall: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: textColorDark,
+        ),
+        headlineMedium: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: textColorDark,
+        ),
+        titleLarge: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: textColorDark,
+        ),
+        bodyLarge: TextStyle(
+          fontSize: 16,
+          color: textColorDark,
+        ),
+        bodyMedium: TextStyle(
+          fontSize: 14,
+          color: textColorDark,
+        ),
+        bodySmall: TextStyle(
+          fontSize: 12,
+          color: secondaryTextColorDark,
+        ),
+      ),
+    ),
     colorScheme: const ColorScheme.dark(
       primary: primaryColorDark,
       secondary: secondaryColorDark,
@@ -162,45 +204,6 @@ class ThemeConstants {
       surface: cardColorDark,
       onBackground: textColorDark,
       onSurface: textColorDark,
-    ),
-    textTheme: const TextTheme(
-      displayLarge: TextStyle(
-        fontSize: 28,
-        fontWeight: FontWeight.bold,
-        color: textColorDark,
-      ),
-      displayMedium: TextStyle(
-        fontSize: 24,
-        fontWeight: FontWeight.bold,
-        color: textColorDark,
-      ),
-      displaySmall: TextStyle(
-        fontSize: 20,
-        fontWeight: FontWeight.bold,
-        color: textColorDark,
-      ),
-      headlineMedium: TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: textColorDark,
-      ),
-      titleLarge: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        color: textColorDark,
-      ),
-      bodyLarge: TextStyle(
-        fontSize: 16,
-        color: textColorDark,
-      ),
-      bodyMedium: TextStyle(
-        fontSize: 14,
-        color: textColorDark,
-      ),
-      bodySmall: TextStyle(
-        fontSize: 12,
-        color: secondaryTextColorDark,
-      ),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: primaryColorDark,
