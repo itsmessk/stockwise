@@ -98,7 +98,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadMarketMovers() async {
     try {
-      // Check if we're using demo API key
       final apiKey = _apiService.getApiKey();
       
       if (apiKey == 'demo' || apiKey == '342567CHG66NUVWB') {
@@ -131,32 +130,6 @@ class _HomeScreenState extends State<HomeScreen> {
               previousClose: 334.66,
               lastUpdated: DateTime.now().toString(),
             ),
-            Stock(
-              symbol: 'GOOGL',
-              name: 'Alphabet Inc.',
-              price: 137.56,
-              change: 1.23,
-              changePercent: 0.90,
-              volume: 15678900,
-              high: 138.75,
-              low: 136.80,
-              open: 137.10,
-              previousClose: 136.33,
-              lastUpdated: DateTime.now().toString(),
-            ),
-            Stock(
-              symbol: 'AMZN',
-              name: 'Amazon.com Inc.',
-              price: 178.23,
-              change: 2.12,
-              changePercent: 1.20,
-              volume: 34567800,
-              high: 179.50,
-              low: 177.10,
-              open: 177.25,
-              previousClose: 176.11,
-              lastUpdated: DateTime.now().toString(),
-            ),
           ];
           
           _topLosers = [
@@ -186,119 +159,20 @@ class _HomeScreenState extends State<HomeScreen> {
               previousClose: 487.73,
               lastUpdated: DateTime.now().toString(),
             ),
-            Stock(
-              symbol: 'NFLX',
-              name: 'Netflix Inc.',
-              price: 602.78,
-              change: -5.67,
-              changePercent: -0.93,
-              volume: 12345600,
-              high: 610.25,
-              low: 601.50,
-              open: 609.75,
-              previousClose: 608.45,
-              lastUpdated: DateTime.now().toString(),
-            ),
-            Stock(
-              symbol: 'NVDA',
-              name: 'NVIDIA Corporation',
-              price: 925.66,
-              change: -12.34,
-              changePercent: -1.32,
-              volume: 54321000,
-              high: 940.25,
-              low: 924.10,
-              open: 938.75,
-              previousClose: 938.00,
-              lastUpdated: DateTime.now().toString(),
-            ),
           ];
         });
         return;
       }
-      
-      // For real API key, fetch actual data
-      final gainers = await Future.wait([
-        _apiService.getStockQuote('AAPL'),
-        _apiService.getStockQuote('MSFT'),
-        _apiService.getStockQuote('GOOGL'),
-        _apiService.getStockQuote('AMZN'),
-      ]);
-      
-      final losers = await Future.wait([
-        _apiService.getStockQuote('TSLA'),
-        _apiService.getStockQuote('META'),
-        _apiService.getStockQuote('NFLX'),
-        _apiService.getStockQuote('NVDA'),
-      ]);
-      
+
+      // Fetch top gainers and losers from API
+      final result = await _apiService.getTopGainersLosers();
       setState(() {
-        _topGainers = gainers;
-        _topLosers = losers;
+        _topGainers = result['gainers'] ?? [];
+        _topLosers = result['losers'] ?? [];
       });
     } catch (e) {
-      // Use sample data as fallback
       setState(() {
         _errorMessage = 'Failed to load market movers: $e';
-        
-        // Fallback data
-        _topGainers = [
-          Stock(
-            symbol: 'AAPL',
-            name: 'Apple Inc.',
-            price: 175.34,
-            change: 2.56,
-            changePercent: 1.48,
-            volume: 65432100,
-            high: 177.50,
-            low: 174.20,
-            open: 174.80,
-            previousClose: 172.78,
-            lastUpdated: DateTime.now().toString(),
-          ),
-          Stock(
-            symbol: 'MSFT',
-            name: 'Microsoft Corporation',
-            price: 338.11,
-            change: 3.45,
-            changePercent: 1.03,
-            volume: 23456700,
-            high: 340.25,
-            low: 336.50,
-            open: 337.10,
-            previousClose: 334.66,
-            lastUpdated: DateTime.now().toString(),
-          ),
-        ];
-        
-        _topLosers = [
-          Stock(
-            symbol: 'TSLA',
-            name: 'Tesla Inc.',
-            price: 172.82,
-            change: -3.45,
-            changePercent: -1.96,
-            volume: 87654300,
-            high: 176.50,
-            low: 172.10,
-            open: 176.30,
-            previousClose: 176.27,
-            lastUpdated: DateTime.now().toString(),
-          ),
-          Stock(
-            symbol: 'META',
-            name: 'Meta Platforms Inc.',
-            price: 485.39,
-            change: -2.34,
-            changePercent: -0.48,
-            volume: 43215600,
-            high: 489.25,
-            low: 484.10,
-            open: 488.75,
-            previousClose: 487.73,
-            lastUpdated: DateTime.now().toString(),
-          ),
-        ];
       });
     }
   }
