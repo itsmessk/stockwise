@@ -563,9 +563,9 @@ class _StockDetailsScreenState extends State<StockDetailsScreen> with SingleTick
   Widget _buildKeyStatisticsGrid() {
     return GridView.count(
       crossAxisCount: 2,
+      childAspectRatio: 2.5,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 2.5,
       children: [
         _buildStatItem('Open', '\$${_stock!.open.toStringAsFixed(2)}'),
         _buildStatItem('Previous Close', '\$${_stock!.previousClose.toStringAsFixed(2)}'),
@@ -574,10 +574,10 @@ class _StockDetailsScreenState extends State<StockDetailsScreen> with SingleTick
         _buildStatItem('Volume', NumberFormat.compact().format(_stock!.volume)),
         if (_companyProfile != null) ...[
           _buildStatItem('Market Cap', _companyProfile!.marketCap),
-          _buildStatItem('P/E Ratio', _companyProfile!.peRatio),
-          _buildStatItem('Dividend Yield', _companyProfile!.dividendYield),
-          _buildStatItem('52-Week High', _companyProfile!.weekHigh52),
-          _buildStatItem('52-Week Low', _companyProfile!.weekLow52),
+          _buildStatItem('P/E Ratio', _companyProfile!.peRatio.toStringAsFixed(2)),
+          _buildStatItem('Dividend Yield', _companyProfile!.dividendYield.toStringAsFixed(2)),
+          _buildStatItem('52-Week High', _companyProfile!.weekHigh52.toStringAsFixed(2)),
+          _buildStatItem('52-Week Low', _companyProfile!.weekLow52.toStringAsFixed(2)),
         ],
       ],
     );
@@ -655,12 +655,12 @@ class _StockDetailsScreenState extends State<StockDetailsScreen> with SingleTick
               ),
             ),
             const SizedBox(height: 16),
-            _buildInfoItem('Earnings Per Share (EPS)', _companyProfile!.eps),
+            _buildInfoItem('Earnings Per Share (EPS)', _companyProfile!.eps.toStringAsFixed(2)),
             _buildInfoItem('Revenue', _companyProfile!.revenue),
             _buildInfoItem('Gross Profit', _companyProfile!.grossProfit),
-            _buildInfoItem('EBITDA', _companyProfile!.ebitda),
-            _buildInfoItem('Profit Margin', _companyProfile!.profitMargin),
-            _buildInfoItem('Beta', _companyProfile!.beta),
+            _buildInfoItem('EBITDA', _companyProfile!.ebitda.toStringAsFixed(2)),
+            _buildInfoItem('Profit Margin', _companyProfile!.profitMargin.toStringAsFixed(2)),
+            _buildInfoItem('Beta', _companyProfile!.beta.toStringAsFixed(2)),
           ] else
             Center(
               child: Padding(
