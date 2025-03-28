@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:provider/provider.dart';
 import 'package:stockwise/firebase_options.dart';
-import 'package:stockwise/services/auth_service.dart';
-import 'package:stockwise/services/theme_service.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,9 +31,6 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final ThemeService _themeService = ThemeService();
-  final AuthService _authService = AuthService();
-  
   bool _isDarkMode = false;
 
   @override
@@ -43,8 +38,24 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       title: 'StockWise',
       debugShowCheckedModeBanner: false,
-      theme: _themeService.getLightTheme(),
-      darkTheme: _themeService.getDarkTheme(),
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.green,
+          brightness: Brightness.light,
+        ),
+        textTheme: GoogleFonts.poppinsTextTheme(),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.green,
+          brightness: Brightness.dark,
+        ),
+        textTheme: GoogleFonts.poppinsTextTheme(
+          ThemeData.dark().textTheme,
+        ),
+      ),
       themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
       home: const HomeScreen(),
     );
@@ -59,6 +70,7 @@ class HomeScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('StockWise'),
+        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
       ),
       body: Center(
         child: Column(
@@ -70,18 +82,20 @@ class HomeScreen extends StatelessWidget {
               color: Colors.green,
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               'Welcome to StockWise',
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.primary,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Your personal stock market companion',
               style: TextStyle(
                 fontSize: 16,
+                color: Theme.of(context).colorScheme.secondary,
               ),
             ),
             const SizedBox(height: 48),
@@ -95,6 +109,18 @@ class HomeScreen extends StatelessWidget {
                 );
               },
               child: const Text('Search Stocks'),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () {
+                // Will implement API key setup later
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please set your API key in the .env file'),
+                  ),
+                );
+              },
+              child: const Text('Set API Key'),
             ),
           ],
         ),
