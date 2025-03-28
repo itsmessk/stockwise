@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:provider/provider.dart';
 import 'package:stockwise/firebase_options.dart';
 import 'package:stockwise/screens/home_screen.dart';
 import 'package:stockwise/screens/search_screen.dart';
@@ -17,12 +18,23 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables
   await dotenv.load(fileName: ".env");
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  
+  // Initialize Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    print('Firebase initialized successfully');
+  } catch (e) {
+    print('Error initializing Firebase: $e');
+  }
+  
   runApp(const MyApp());
 }
 
@@ -34,99 +46,189 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  final ThemeService _themeService = ThemeService();
+  final PreferencesService _preferencesService = PreferencesService();
+  final AuthService _authService = AuthService();
+  
   bool _isDarkMode = false;
+  bool _isLoading = true;
+  bool _isInitialLaunch = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThemePreference();
+    _checkInitialLaunch();
+  }
+
+  Future<void> _loadThemePreference() async {
+    try {
+      final preferences = await _preferencesService.getUserPreferences();
+      setState(() {
+        _isDarkMode = preferences.darkMode;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error getting user preferences: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _checkInitialLaunch() async {
+    try {
+      final preferences = await _preferencesService.getUserPreferences();
+      setState(() {
+        _isInitialLaunch = preferences.isFirstLaunch;
+      });
+      
+      if (_isInitialLaunch) {
+        // Update first launch preference
+        try {
+          await _preferencesService.updateFirstLaunch(false);
+        } catch (e) {
+          print('Error saving user preferences: $e');
+        }
+      }
+    } catch (e) {
+      // Default to true if there's an error
+      print('Error checking initial launch: $e');
+      setState(() {
+        _isInitialLaunch = true;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'StockWise',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.green,
-          brightness: Brightness.light,
+    if (_isLoading) {
+      return MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: CircularProgressIndicator(),
+          ),
         ),
-        textTheme: GoogleFonts.poppinsTextTheme(),
+      );
+    }
+
+    return StreamProvider<User?>.value(
+      value: _authService.authStateChanges,
+      initialData: null,
+      child: MaterialApp(
+        title: 'StockWise',
+        debugShowCheckedModeBanner: false,
+        theme: _themeService.getLightTheme(),
+        darkTheme: _themeService.getDarkTheme(),
+        themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('en', 'US'), // English
+          Locale('es', 'ES'), // Spanish
+          Locale('fr', 'FR'), // French
+          Locale('de', 'DE'), // German
+          Locale('ja', 'JP'), // Japanese
+          Locale('zh', 'CN'), // Chinese
+        ],
+        initialRoute: _isInitialLaunch ? '/splash' : '/',
+        routes: {
+          '/': (context) => AuthWrapper(),
+          '/splash': (context) => const SplashScreen(),
+          '/login': (context) => const LoginScreen(),
+          '/register': (context) => const RegisterScreen(),
+          '/search': (context) => const SearchScreen(),
+          '/portfolio': (context) => const PortfolioScreen(),
+          '/profile': (context) => const ProfileScreen(),
+        },
+        // Use onGenerateRoute for screens that require parameters
+        onGenerateRoute: (settings) {
+          if (settings.name == '/stock_details') {
+            final args = settings.arguments as Map<String, dynamic>;
+            return MaterialPageRoute(
+              builder: (context) => StockDetailsScreen(
+                symbol: args['symbol'],
+              ),
+            );
+          } else if (settings.name == '/news_details') {
+            final args = settings.arguments as Map<String, dynamic>;
+            return MaterialPageRoute(
+              builder: (context) => NewsDetailsScreen(
+                news: args['news'],
+              ),
+            );
+          }
+          return null;
+        },
       ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.green,
-          brightness: Brightness.dark,
-        ),
-        textTheme: GoogleFonts.poppinsTextTheme(
-          ThemeData.dark().textTheme,
-        ),
-      ),
-      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
-      home: const HomeScreen(),
     );
   }
 }
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+class AuthWrapper extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final user = Provider.of<User?>(context);
+    
+    // Return login if not authenticated, otherwise return main app
+    if (user == null) {
+      return const LoginScreen();
+    }
+    
+    return const MainScreen();
+  }
+}
+
+class MainScreen extends StatefulWidget {
+  const MainScreen({Key? key}) : super(key: key);
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  int _currentIndex = 0;
+  
+  final List<Widget> _screens = [
+    const HomeScreen(),
+    const SearchScreen(),
+    const PortfolioScreen(),
+    const ProfileScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('StockWise'),
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.show_chart,
-              size: 80,
-              color: Colors.green,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Welcome to StockWise',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Your personal stock market companion',
-              style: TextStyle(
-                fontSize: 16,
-                color: Theme.of(context).colorScheme.secondary,
-              ),
-            ),
-            const SizedBox(height: 48),
-            ElevatedButton(
-              onPressed: () {
-                // Will implement search functionality later
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Search functionality coming soon!'),
-                  ),
-                );
-              },
-              child: const Text('Search Stocks'),
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: () {
-                // Will implement API key setup later
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please set your API key in the .env file'),
-                  ),
-                );
-              },
-              child: const Text('Set API Key'),
-            ),
-          ],
-        ),
+      body: _screens[_currentIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.search),
+            label: 'Search',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.star),
+            label: 'Watchlist',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person),
+            label: 'Profile',
+          ),
+        ],
       ),
     );
   }
