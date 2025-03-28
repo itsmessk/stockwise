@@ -27,6 +27,7 @@ class PreferencesService {
         language: 'en',
         darkMode: false,
         watchlist: [],
+        isFirstLaunch: true,
       );
     }
   }
@@ -69,5 +70,19 @@ class PreferencesService {
   Future<void> setLanguage(String language) async {
     final preferences = await getUserPreferences();
     await saveUserPreferences(preferences.copyWith(language: language));
+  }
+
+  // Update dark mode preference
+  Future<void> updateDarkMode(bool darkMode) async {
+    final prefs = await getUserPreferences();
+    final updatedPrefs = prefs.copyWith(darkMode: darkMode);
+    await saveUserPreferences(updatedPrefs);
+  }
+
+  // Update first launch preference
+  Future<void> updateFirstLaunch(bool isFirstLaunch) async {
+    final prefs = await getUserPreferences();
+    final updatedPrefs = prefs.copyWith(isFirstLaunch: isFirstLaunch);
+    await saveUserPreferences(updatedPrefs);
   }
 }

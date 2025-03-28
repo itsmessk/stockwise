@@ -3,12 +3,14 @@ class UserPreferences {
   final String language;
   final bool darkMode;
   final List<String> watchlist;
+  final bool isFirstLaunch;
 
   UserPreferences({
     required this.preferredCurrency,
     required this.language,
     required this.darkMode,
     required this.watchlist,
+    this.isFirstLaunch = true,
   });
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
@@ -19,6 +21,7 @@ class UserPreferences {
       watchlist: json['watchlist'] != null 
         ? List<String>.from(json['watchlist'])
         : [],
+      isFirstLaunch: json['is_first_launch'] ?? true,
     );
   }
 
@@ -28,6 +31,7 @@ class UserPreferences {
       'language': language,
       'dark_mode': darkMode,
       'watchlist': watchlist,
+      'is_first_launch': isFirstLaunch,
     };
   }
 
@@ -36,12 +40,14 @@ class UserPreferences {
     String? language,
     bool? darkMode,
     List<String>? watchlist,
+    bool? isFirstLaunch,
   }) {
     return UserPreferences(
       preferredCurrency: preferredCurrency ?? this.preferredCurrency,
       language: language ?? this.language,
       darkMode: darkMode ?? this.darkMode,
       watchlist: watchlist ?? this.watchlist,
+      isFirstLaunch: isFirstLaunch ?? this.isFirstLaunch,
     );
   }
 }

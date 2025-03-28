@@ -124,8 +124,25 @@ class _MyAppState extends State<MyApp> {
           '/search': (context) => const SearchScreen(),
           '/portfolio': (context) => const PortfolioScreen(),
           '/profile': (context) => const ProfileScreen(),
-          '/stock_details': (context) => const StockDetailsScreen(),
-          '/news_details': (context) => const NewsDetailsScreen(),
+        },
+        // Use onGenerateRoute for screens that require parameters
+        onGenerateRoute: (settings) {
+          if (settings.name == '/stock_details') {
+            final args = settings.arguments as Map<String, dynamic>;
+            return MaterialPageRoute(
+              builder: (context) => StockDetailsScreen(
+                symbol: args['symbol'],
+              ),
+            );
+          } else if (settings.name == '/news_details') {
+            final args = settings.arguments as Map<String, dynamic>;
+            return MaterialPageRoute(
+              builder: (context) => NewsDetailsScreen(
+                news: args['news'],
+              ),
+            );
+          }
+          return null;
         },
       ),
     );
