@@ -19,6 +19,9 @@ class AppUser {
     required this.lastLoginAt,
   });
 
+  // Getter for photoURL to match Firebase User property
+  String? get photoURL => photoUrl;
+
   factory AppUser.fromFirebaseUser(firebase_auth.User user) {
     return AppUser(
       id: user.uid,

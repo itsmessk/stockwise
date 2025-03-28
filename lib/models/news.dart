@@ -21,6 +21,12 @@ class NewsArticle {
     required this.sentiment,
   });
 
+  // Getters for properties used in news_details_screen.dart and news_card.dart
+  String? get urlToImage => imageUrl.isNotEmpty ? imageUrl : null;
+  String? get author => source;
+  String? get description => summary;
+  String? get content => summary;
+
   factory NewsArticle.fromJson(Map<String, dynamic> json) {
     return NewsArticle(
       title: json['title'] ?? '',

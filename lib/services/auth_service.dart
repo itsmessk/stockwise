@@ -16,6 +16,11 @@ class AuthService {
   Stream<AppUser?> get userStream {
     return _auth.authStateChanges().map(_userFromFirebaseUser);
   }
+  
+  // Auth state changes stream for Firebase User
+  Stream<User?> get authStateChanges {
+    return _auth.authStateChanges();
+  }
 
   // Get current user
   AppUser? get currentUser {

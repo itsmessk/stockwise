@@ -117,6 +117,39 @@ class CompanyProfile {
     required this.lastSplitDate,
   });
 
+  // Getters for properties used in stock_details_screen.dart
+  String get marketCap => _formatMarketCap(marketCapitalization);
+  String get website => "https://${name.toLowerCase().replaceAll(' ', '')}.com";
+  String get revenue => _formatCurrency(revenueTTM);
+  String get grossProfit => _formatCurrency(grossProfitTTM);
+  double get weekHigh52 => fiftyTwoWeekHigh;
+  double get weekLow52 => fiftyTwoWeekLow;
+
+  // Helper methods for formatting
+  String _formatMarketCap(double value) {
+    if (value >= 1000000000000) {
+      return '${(value / 1000000000000).toStringAsFixed(2)}T';
+    } else if (value >= 1000000000) {
+      return '${(value / 1000000000).toStringAsFixed(2)}B';
+    } else if (value >= 1000000) {
+      return '${(value / 1000000).toStringAsFixed(2)}M';
+    } else {
+      return value.toStringAsFixed(2);
+    }
+  }
+
+  String _formatCurrency(double value) {
+    if (value >= 1000000000000) {
+      return '\$${(value / 1000000000000).toStringAsFixed(2)}T';
+    } else if (value >= 1000000000) {
+      return '\$${(value / 1000000000).toStringAsFixed(2)}B';
+    } else if (value >= 1000000) {
+      return '\$${(value / 1000000).toStringAsFixed(2)}M';
+    } else {
+      return '\$${value.toStringAsFixed(2)}';
+    }
+  }
+
   factory CompanyProfile.fromJson(Map<String, dynamic> json) {
     return CompanyProfile(
       symbol: json['Symbol'] ?? '',

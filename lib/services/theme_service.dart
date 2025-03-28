@@ -78,4 +78,14 @@ class ThemeService extends ChangeNotifier {
         ? ThemeConstants.darkTheme 
         : ThemeConstants.lightTheme;
   }
+  
+  // Get light theme
+  ThemeData getLightTheme() {
+    return ThemeConstants.lightTheme;
+  }
+  
+  // Get dark theme
+  ThemeData getDarkTheme() {
+    return ThemeConstants.darkTheme;
+  }
 }
