@@ -257,6 +257,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
                   
+                  // Advanced settings
+                  Card(
+                    elevation: 0,
+                    color: theme.colorScheme.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: ListTile(
+                      title: const Text('Advanced Settings'),
+                      subtitle: Text(
+                        'API keys, preferences, and more',
+                        style: TextStyle(
+                          color: theme.colorScheme.onBackground.withOpacity(0.7),
+                        ),
+                      ),
+                      leading: Icon(
+                        Icons.settings,
+                        color: theme.colorScheme.primary,
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.pushNamed(context, '/settings');
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  
                   // Theme setting
                   Card(
                     elevation: 0,
@@ -438,7 +465,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             color: theme.colorScheme.primary,
                             size: 48,
                           ),
-                          applicationLegalese: '© 2025 StockWise',
+                          applicationLegalese: ' 2025 StockWise',
                           children: [
                             const SizedBox(height: 16),
                             const Text(

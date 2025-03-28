@@ -11,6 +11,7 @@ import 'package:stockwise/screens/register_screen.dart';
 import 'package:stockwise/screens/splash_screen.dart';
 import 'package:stockwise/screens/stock_details_screen.dart';
 import 'package:stockwise/screens/news_details_screen.dart';
+import 'package:stockwise/screens/settings_screen.dart';
 import 'package:stockwise/services/auth_service.dart';
 import 'package:stockwise/services/theme_service.dart';
 import 'package:stockwise/services/preferences_service.dart';
@@ -143,6 +144,7 @@ class _MyAppState extends State<MyApp> {
           '/search': (context) => const SearchScreen(),
           '/portfolio': (context) => const PortfolioScreen(),
           '/profile': (context) => const ProfileScreen(),
+          '/settings': (context) => const SettingsScreen(),
         },
         // Use onGenerateRoute for screens that require parameters
         onGenerateRoute: (settings) {
