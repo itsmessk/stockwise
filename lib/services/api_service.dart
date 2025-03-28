@@ -16,7 +16,12 @@ class ApiService {
   }
 
   ApiService._internal() {
-    _apiKey = dotenv.env['ALPHA_VANTAGE_API_KEY'] ?? '';
+    _apiKey = dotenv.env['ALPHA_VANTAGE_API_KEY'] ?? 'demo';
+  }
+
+  // Get the API key for checking in other parts of the app
+  String getApiKey() {
+    return _apiKey;
   }
 
   // Get stock quote data

@@ -231,6 +231,40 @@ class DatabaseService {
     }
   }
 
+  // Add a search query to history
+  Future<void> addSearchQuery(String query) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+      
+      // Get the current search history
+      final searchHistory = await getSearchHistory();
+      
+      // Add the new query if it doesn't exist
+      if (!searchHistory.contains(query)) {
+        searchHistory.add(query);
+        
+        // Limit to 10 most recent searches
+        if (searchHistory.length > 10) {
+          searchHistory.removeAt(0);
+        }
+        
+        // Update the search history
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('search_history')
+            .doc('history')
+            .set({'queries': searchHistory});
+      }
+    } catch (e) {
+      print('Error adding search query: $e');
+      // Don't throw the error to prevent app crashes
+    }
+  }
+
   // Save user preferences
   Future<void> saveUserPreferences({
     required bool darkMode,
