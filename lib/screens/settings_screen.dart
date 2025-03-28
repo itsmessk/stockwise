@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:stockwise/services/theme_service.dart';
-import 'package:stockwise/services/preferences_service.dart';
-import 'package:stockwise/constants/theme_constants.dart';
-import 'package:flutter_spinkit/flutter_spinkit.dart';
-import 'package:stockwise/services/api_service.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../models/user_model.dart';
+import '../services/preferences_service.dart';
+import '../services/database_service.dart';
+import '../services/auth_service.dart';
+import '../widgets/loading_indicator.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -16,40 +14,29 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final PreferencesService _preferencesService = PreferencesService();
-  final ApiService _apiService = ApiService();
+  final DatabaseService _databaseService = DatabaseService();
+  final AuthService _authService = AuthService();
   
+  UserPreferences _preferences = UserPreferences();
   bool _isLoading = true;
-  bool _isDarkMode = false;
-  String _defaultCurrency = 'USD';
-  String _apiKey = '';
+  bool _isSaving = false;
   
   @override
   void initState() {
     super.initState();
-    _loadUserPreferences();
+    _loadPreferences();
   }
-
-  Future<void> _loadUserPreferences() async {
+  
+  Future<void> _loadPreferences() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
     try {
-      setState(() {
-        _isLoading = true;
-      });
-      
-      final prefs = await _preferencesService.getUserPreferences();
-      
-      // Get API key from .env or ApiService
-      String apiKey = '';
-      try {
-        apiKey = _apiService.getApiKey();
-      } catch (e) {
-        print('Error getting API key: $e');
-        apiKey = 'demo';
-      }
+      // Load preferences from SharedPreferences
+      _preferences = await _preferencesService.getUserPreferences();
       
       setState(() {
-        _isDarkMode = prefs.darkMode;
-        _defaultCurrency = prefs.defaultCurrency;
-        _apiKey = apiKey;
         _isLoading = false;
       });
     } catch (e) {
@@ -57,247 +44,372 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _isLoading = false;
       });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error loading preferences. Using defaults.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
-
-  Future<void> _toggleTheme() async {
+  
+  Future<void> _savePreferences() async {
+    setState(() {
+      _isSaving = true;
+    });
+    
     try {
-      final newValue = !_isDarkMode;
-      await _preferencesService.updateDarkMode(newValue);
+      // Save to SharedPreferences
+      await _preferencesService.saveUserPreferences(_preferences);
       
-      // Update theme service
-      final themeService = Provider.of<ThemeService>(context, listen: false);
-      await themeService.setThemeMode(newValue ? ThemeMode.dark : ThemeMode.light);
+      // Save to Firestore if user is logged in
+      try {
+        await _databaseService.updateUserPreferences(_preferences);
+      } catch (e) {
+        print('Error saving to Firestore: $e');
+      }
       
       setState(() {
-        _isDarkMode = newValue;
+        _isSaving = false;
       });
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Theme updated to ${newValue ? 'dark' : 'light'} mode')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Settings saved successfully'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
-      print('Error toggling theme: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update theme: $e')),
-      );
-    }
-  }
-
-  Future<void> _updateCurrency(String currency) async {
-    try {
-      await _preferencesService.updateCurrency(currency);
+      print('Error saving preferences: $e');
       setState(() {
-        _defaultCurrency = currency;
+        _isSaving = false;
       });
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Default currency updated to $currency')),
-      );
-    } catch (e) {
-      print('Error updating currency: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update currency: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error saving settings. Please try again.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
-
-  Future<void> _updateApiKey(String apiKey) async {
+  
+  Future<void> _signOut() async {
     try {
-      // Save to .env file or a secure storage
-      // This is a simplified implementation
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('API key update functionality is not implemented yet'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      await _authService.signOut();
       
-      setState(() {
-        _apiKey = apiKey;
-      });
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     } catch (e) {
-      print('Error updating API key: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update API key: $e')),
-      );
+      print('Error signing out: $e');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error signing out. Please try again.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
-
+  
+  Future<void> _clearWeatherHistory() async {
+    try {
+      await _databaseService.clearWeatherHistory();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Weather history cleared'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error clearing weather history: $e');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error clearing weather history. Please try again.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    if (_isLoading) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Settings'),
-          backgroundColor: theme.primaryColor,
-          foregroundColor: Colors.white,
-        ),
-        body: Center(
-          child: SpinKitCircle(
-            color: theme.primaryColor,
-            size: 50.0,
-          ),
-        ),
-      );
-    }
-    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
-        backgroundColor: theme.primaryColor,
-        foregroundColor: Colors.white,
+        elevation: 0,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
+      body: _isLoading
+          ? const LoadingIndicator(message: 'Loading settings...')
+          : _buildSettingsContent(),
+    );
+  }
+  
+  Widget _buildSettingsContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Theme settings
-          Card(
-            elevation: 2.0,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Appearance',
-                    style: theme.textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16.0),
-                  SwitchListTile(
-                    title: const Text('Dark Mode'),
-                    subtitle: Text(_isDarkMode ? 'On' : 'Off'),
-                    value: _isDarkMode,
-                    onChanged: (value) => _toggleTheme(),
-                    secondary: Icon(
-                      _isDarkMode ? Icons.dark_mode : Icons.light_mode,
-                      color: theme.primaryColor,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildSectionTitle('Display Settings'),
+          _buildDarkModeSwitch(),
+          const Divider(),
           
-          const SizedBox(height: 16.0),
+          _buildSectionTitle('Units'),
+          _buildTemperatureUnitSelector(),
+          const SizedBox(height: 16),
+          _buildWindSpeedUnitSelector(),
+          const Divider(),
           
-          // Currency settings
-          Card(
-            elevation: 2.0,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Currency',
-                    style: theme.textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16.0),
-                  DropdownButtonFormField<String>(
-                    decoration: InputDecoration(
-                      labelText: 'Default Currency',
-                      border: OutlineInputBorder(),
-                    ),
-                    value: _defaultCurrency,
-                    onChanged: (value) {
-                      if (value != null) {
-                        _updateCurrency(value);
-                      }
-                    },
-                    items: const [
-                      DropdownMenuItem(value: 'USD', child: Text('USD - US Dollar')),
-                      DropdownMenuItem(value: 'EUR', child: Text('EUR - Euro')),
-                      DropdownMenuItem(value: 'GBP', child: Text('GBP - British Pound')),
-                      DropdownMenuItem(value: 'JPY', child: Text('JPY - Japanese Yen')),
-                      DropdownMenuItem(value: 'CAD', child: Text('CAD - Canadian Dollar')),
-                      DropdownMenuItem(value: 'AUD', child: Text('AUD - Australian Dollar')),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildSectionTitle('Forecast Settings'),
+          _buildForecastDaysSelector(),
+          const Divider(),
           
-          const SizedBox(height: 16.0),
+          _buildSectionTitle('Notifications'),
+          _buildNotificationsSwitch(),
+          const Divider(),
           
-          // API settings
-          Card(
-            elevation: 2.0,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'API Settings',
-                    style: theme.textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16.0),
-                  TextFormField(
-                    initialValue: _apiKey,
-                    decoration: const InputDecoration(
-                      labelText: 'Alpha Vantage API Key',
-                      hintText: 'Enter your API key',
-                      border: OutlineInputBorder(),
-                    ),
-                    onFieldSubmitted: (value) {
-                      _updateApiKey(value);
-                    },
-                  ),
-                  const SizedBox(height: 8.0),
-                  Text(
-                    'Get a free API key at alphavantage.co',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildSectionTitle('Account'),
+          _buildAccountActions(),
+          const Divider(),
           
-          const SizedBox(height: 16.0),
+          _buildSectionTitle('Data'),
+          _buildDataActions(),
+          const SizedBox(height: 32),
           
-          // About section
-          Card(
-            elevation: 2.0,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'About',
-                    style: theme.textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16.0),
-                  ListTile(
-                    title: const Text('Version'),
-                    subtitle: const Text('1.0.0'),
-                    leading: Icon(Icons.info_outline, color: theme.primaryColor),
-                  ),
-                  const Divider(),
-                  ListTile(
-                    title: const Text('Terms of Service'),
-                    leading: Icon(Icons.description, color: theme.primaryColor),
-                    onTap: () {
-                      // Navigate to terms of service
-                    },
-                  ),
-                  const Divider(),
-                  ListTile(
-                    title: const Text('Privacy Policy'),
-                    leading: Icon(Icons.privacy_tip, color: theme.primaryColor),
-                    onTap: () {
-                      // Navigate to privacy policy
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildSaveButton(),
+          const SizedBox(height: 16),
         ],
+      ),
+    );
+  }
+  
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
+    );
+  }
+  
+  Widget _buildDarkModeSwitch() {
+    return SwitchListTile(
+      title: const Text('Dark Mode'),
+      subtitle: const Text('Use dark theme'),
+      value: _preferences.darkMode,
+      onChanged: (value) {
+        setState(() {
+          _preferences = _preferences.copyWith(darkMode: value);
+        });
+      },
+    );
+  }
+  
+  Widget _buildTemperatureUnitSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Temperature Unit'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: RadioListTile<String>(
+                title: const Text('Celsius (°C)'),
+                value: 'celsius',
+                groupValue: _preferences.temperatureUnit,
+                onChanged: (value) {
+                  setState(() {
+                    _preferences = _preferences.copyWith(temperatureUnit: value);
+                  });
+                },
+                dense: true,
+              ),
+            ),
+            Expanded(
+              child: RadioListTile<String>(
+                title: const Text('Fahrenheit (°F)'),
+                value: 'fahrenheit',
+                groupValue: _preferences.temperatureUnit,
+                onChanged: (value) {
+                  setState(() {
+                    _preferences = _preferences.copyWith(temperatureUnit: value);
+                  });
+                },
+                dense: true,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildWindSpeedUnitSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Wind Speed Unit'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: RadioListTile<String>(
+                title: const Text('km/h'),
+                value: 'kph',
+                groupValue: _preferences.windSpeedUnit,
+                onChanged: (value) {
+                  setState(() {
+                    _preferences = _preferences.copyWith(windSpeedUnit: value);
+                  });
+                },
+                dense: true,
+              ),
+            ),
+            Expanded(
+              child: RadioListTile<String>(
+                title: const Text('mph'),
+                value: 'mph',
+                groupValue: _preferences.windSpeedUnit,
+                onChanged: (value) {
+                  setState(() {
+                    _preferences = _preferences.copyWith(windSpeedUnit: value);
+                  });
+                },
+                dense: true,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildForecastDaysSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Forecast Days'),
+        const SizedBox(height: 8),
+        Slider(
+          value: _preferences.forecastDays.toDouble(),
+          min: 1,
+          max: 7,
+          divisions: 6,
+          label: _preferences.forecastDays.toString(),
+          onChanged: (value) {
+            setState(() {
+              _preferences = _preferences.copyWith(forecastDays: value.toInt());
+            });
+          },
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('1 day'),
+            Text('${_preferences.forecastDays} days'),
+            const Text('7 days'),
+          ],
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildNotificationsSwitch() {
+    return SwitchListTile(
+      title: const Text('Weather Alerts'),
+      subtitle: const Text('Receive notifications about severe weather'),
+      value: _preferences.notificationsEnabled,
+      onChanged: (value) {
+        setState(() {
+          _preferences = _preferences.copyWith(notificationsEnabled: value);
+        });
+      },
+    );
+  }
+  
+  Widget _buildAccountActions() {
+    return Column(
+      children: [
+        ListTile(
+          title: const Text('Sign Out'),
+          leading: const Icon(Icons.logout),
+          onTap: _signOut,
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildDataActions() {
+    return Column(
+      children: [
+        ListTile(
+          title: const Text('Clear Weather History'),
+          subtitle: const Text('Delete all saved weather history'),
+          leading: const Icon(Icons.delete),
+          onTap: () {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Clear Weather History'),
+                content: const Text('Are you sure you want to clear your weather history? This action cannot be undone.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _clearWeatherHistory();
+                    },
+                    child: const Text('Clear'),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildSaveButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _isSaving ? null : _savePreferences,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: _isSaving
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text('Save Settings'),
+        ),
       ),
     );
   }

@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'package:stockwise/firebase_options.dart';
-import 'package:stockwise/screens/home_screen.dart';
-import 'package:stockwise/screens/search_screen.dart';
-import 'package:stockwise/screens/portfolio_screen.dart';
-import 'package:stockwise/screens/profile_screen.dart';
-import 'package:stockwise/screens/login_screen.dart';
-import 'package:stockwise/screens/register_screen.dart';
-import 'package:stockwise/screens/splash_screen.dart';
-import 'package:stockwise/screens/stock_details_screen.dart';
-import 'package:stockwise/screens/news_details_screen.dart';
-import 'package:stockwise/screens/settings_screen.dart';
-import 'package:stockwise/services/auth_service.dart';
-import 'package:stockwise/services/theme_service.dart';
-import 'package:stockwise/services/preferences_service.dart';
+import 'firebase_options.dart';
+import 'screens/home_screen.dart';
+import 'screens/search_screen.dart';
+import 'screens/favorites_screen.dart';
+import 'screens/news_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
+import 'screens/splash_screen.dart';
+import 'services/auth_service.dart';
+import 'services/theme_service.dart';
+import 'services/preferences_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -117,7 +115,7 @@ class _MyAppState extends State<MyApp> {
       value: _authService.authStateChanges,
       initialData: null,
       child: MaterialApp(
-        title: 'StockWise',
+        title: 'WeatherWise',
         debugShowCheckedModeBanner: false,
         theme: _themeService.getLightTheme(),
         darkTheme: _themeService.getDarkTheme(),
@@ -142,28 +140,9 @@ class _MyAppState extends State<MyApp> {
           '/login': (context) => const LoginScreen(),
           '/register': (context) => const RegisterScreen(),
           '/search': (context) => const SearchScreen(),
-          '/portfolio': (context) => const PortfolioScreen(),
-          '/profile': (context) => const ProfileScreen(),
+          '/favorites': (context) => const FavoritesScreen(),
+          '/news': (context) => const NewsScreen(),
           '/settings': (context) => const SettingsScreen(),
-        },
-        // Use onGenerateRoute for screens that require parameters
-        onGenerateRoute: (settings) {
-          if (settings.name == '/stock_details') {
-            final args = settings.arguments as Map<String, dynamic>;
-            return MaterialPageRoute(
-              builder: (context) => StockDetailsScreen(
-                symbol: args['symbol'],
-              ),
-            );
-          } else if (settings.name == '/news_details') {
-            final args = settings.arguments as Map<String, dynamic>;
-            return MaterialPageRoute(
-              builder: (context) => NewsDetailsScreen(
-                news: args['news'],
-              ),
-            );
-          }
-          return null;
         },
       ),
     );
@@ -197,10 +176,11 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _screens = [
     const HomeScreen(),
     const SearchScreen(),
-    const PortfolioScreen(),
-    const ProfileScreen(),
+    const FavoritesScreen(),
+    const NewsScreen(),
+    const SettingsScreen(),
   ];
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -213,6 +193,8 @@ class _MainScreenState extends State<MainScreen> {
           });
         },
         type: BottomNavigationBarType.fixed,
+        selectedItemColor: Theme.of(context).primaryColor,
+        unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home),
@@ -223,12 +205,16 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Search',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.star),
-            label: 'Watchlist',
+            icon: Icon(Icons.favorite),
+            label: 'Favorites',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
+            icon: Icon(Icons.newspaper),
+            label: 'News',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
           ),
         ],
       ),

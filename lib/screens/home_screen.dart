@@ -1,12 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:stockwise/services/api_service.dart';
-import 'package:stockwise/services/database_service.dart';
-import 'package:stockwise/models/stock.dart';
-import 'package:stockwise/models/news.dart';
-import 'package:stockwise/widgets/stock_list_item.dart';
-import 'package:stockwise/widgets/news_card.dart';
-import 'package:stockwise/widgets/market_overview_card.dart';
-import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/weather_model.dart';
+import '../models/forecast_model.dart';
+import '../models/user_model.dart';
+import '../services/weather_service.dart';
+import '../services/location_service.dart';
+import '../services/preferences_service.dart';
+import '../services/database_service.dart';
+import '../utils/weather_utils.dart';
+import '../utils/date_utils.dart';
+import '../constants/theme_constants.dart';
+import '../widgets/weather_card.dart';
+import '../widgets/forecast_card.dart';
+import '../widgets/hourly_forecast_list.dart';
+import '../widgets/weather_details_card.dart';
+import '../widgets/loading_indicator.dart';
+import '../widgets/error_message.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -16,506 +26,294 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final ApiService _apiService = ApiService();
+  final WeatherService _weatherService = WeatherService();
+  final LocationService _locationService = LocationService();
+  final PreferencesService _preferencesService = PreferencesService();
   final DatabaseService _databaseService = DatabaseService();
   
+  Weather? _currentWeather;
+  WeatherForecast? _forecast;
+  String _currentLocation = '';
   bool _isLoading = true;
-  bool _isWatchlistLoading = true;
-  bool _isNewsLoading = true;
-  
-  List<Stock> _watchlist = [];
-  List<Stock> _topGainers = [];
-  List<Stock> _topLosers = [];
-  List<NewsArticle> _news = [];
-  
+  bool _isError = false;
   String _errorMessage = '';
-
+  UserPreferences _preferences = UserPreferences();
+  bool _isFavorite = false;
+  
   @override
   void initState() {
     super.initState();
     _loadData();
   }
-
+  
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
-      _errorMessage = '';
+      _isError = false;
     });
-
-    await Future.wait([
-      _loadWatchlist(),
-      _loadMarketMovers(),
-      _loadNews(),
-    ]);
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _loadWatchlist() async {
-    try {
-      setState(() {
-        _isWatchlistLoading = true;
-      });
-      
-      // Get watchlist from Firestore
-      final watchlist = await _databaseService.getWatchlist();
-      
-      // Update watchlist with latest data
-      final updatedWatchlist = <Stock>[];
-      
-      for (final stock in watchlist) {
-        try {
-          final updatedStock = await _apiService.getStockQuote(stock.symbol);
-          updatedWatchlist.add(updatedStock);
-          
-          // Update stock in Firestore
-          await _databaseService.updateStockPrice(
-            stock.symbol,
-            updatedStock.price,
-            updatedStock.change,
-            updatedStock.changePercent,
-            updatedStock.lastUpdated,
-          );
-        } catch (e) {
-          // If we can't get updated data, use the stored data
-          updatedWatchlist.add(stock);
-        }
-      }
-      
-      setState(() {
-        _watchlist = updatedWatchlist;
-        _isWatchlistLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to load watchlist: $e';
-        _isWatchlistLoading = false;
-      });
-    }
-  }
-
-  Future<void> _loadMarketMovers() async {
-    try {
-      final apiKey = _apiService.getApiKey();
-      
-      if (apiKey == 'demo' || apiKey == '342567CHG66NUVWB') {
-        // Use sample data for demo mode
-        setState(() {
-          _topGainers = [
-            Stock(
-              symbol: 'AAPL',
-              name: 'Apple Inc.',
-              price: 175.34,
-              change: 2.56,
-              changePercent: 1.48,
-              volume: 65432100,
-              high: 177.50,
-              low: 174.20,
-              open: 174.80,
-              previousClose: 172.78,
-              lastUpdated: DateTime.now().toString(),
-            ),
-            Stock(
-              symbol: 'MSFT',
-              name: 'Microsoft Corporation',
-              price: 338.11,
-              change: 3.45,
-              changePercent: 1.03,
-              volume: 23456700,
-              high: 340.25,
-              low: 336.50,
-              open: 337.10,
-              previousClose: 334.66,
-              lastUpdated: DateTime.now().toString(),
-            ),
-          ];
-          
-          _topLosers = [
-            Stock(
-              symbol: 'TSLA',
-              name: 'Tesla Inc.',
-              price: 172.82,
-              change: -3.45,
-              changePercent: -1.96,
-              volume: 87654300,
-              high: 176.50,
-              low: 172.10,
-              open: 176.30,
-              previousClose: 176.27,
-              lastUpdated: DateTime.now().toString(),
-            ),
-            Stock(
-              symbol: 'META',
-              name: 'Meta Platforms Inc.',
-              price: 485.39,
-              change: -2.34,
-              changePercent: -0.48,
-              volume: 43215600,
-              high: 489.25,
-              low: 484.10,
-              open: 488.75,
-              previousClose: 487.73,
-              lastUpdated: DateTime.now().toString(),
-            ),
-          ];
-        });
-        return;
-      }
-
-      // Fetch top gainers and losers from API
-      final result = await _apiService.getTopGainersLosers();
-      setState(() {
-        _topGainers = result['gainers'] ?? [];
-        _topLosers = result['losers'] ?? [];
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to load market movers: $e';
-      });
-    }
-  }
-
-  Future<void> _loadNews() async {
-    try {
-      setState(() {
-        _isNewsLoading = true;
-      });
-      
-      // Check if we're using demo API key
-      final apiKey = _apiService.getApiKey();
-      
-      if (apiKey == 'demo' || apiKey == '342567CHG66NUVWB') {
-        // Use sample data for demo mode
-        setState(() {
-          _news = [
-            NewsArticle(
-              title: 'Apple Announces New iPhone Model',
-              source: 'Tech News',
-              url: 'https://example.com/apple-news',
-              publishedAt: DateTime.now().subtract(const Duration(hours: 2)).toString(),
-              summary: 'Apple has announced its latest iPhone model with improved features and performance.',
-              imageUrl: 'https://via.placeholder.com/300x200?text=Apple+News',
-              topics: ['Technology', 'Apple', 'iPhone'],
-              tickers: ['AAPL'],
-              sentiment: 0.75,
-            ),
-            NewsArticle(
-              title: 'Microsoft Reports Strong Quarterly Earnings',
-              source: 'Business Insider',
-              url: 'https://example.com/microsoft-earnings',
-              publishedAt: DateTime.now().subtract(const Duration(hours: 5)).toString(),
-              summary: 'Microsoft exceeded analyst expectations with its latest quarterly earnings report.',
-              imageUrl: 'https://via.placeholder.com/300x200?text=Microsoft+News',
-              topics: ['Business', 'Earnings', 'Technology'],
-              tickers: ['MSFT'],
-              sentiment: 0.82,
-            ),
-            NewsArticle(
-              title: 'Tesla Expands Production Capacity',
-              source: 'Auto News',
-              url: 'https://example.com/tesla-expansion',
-              publishedAt: DateTime.now().subtract(const Duration(hours: 8)).toString(),
-              summary: 'Tesla is expanding its production capacity to meet growing demand for electric vehicles.',
-              imageUrl: 'https://via.placeholder.com/300x200?text=Tesla+News',
-              topics: ['Automotive', 'Manufacturing', 'Electric Vehicles'],
-              tickers: ['TSLA'],
-              sentiment: 0.65,
-            ),
-          ];
-          _isNewsLoading = false;
-        });
-        return;
-      }
-      
-      final newsResponse = await _apiService.getMarketNews(limit: 10);
-      
-      setState(() {
-        _news = newsResponse.articles;
-        _isNewsLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to load news: $e';
-        _isNewsLoading = false;
-        
-        // Fallback data
-        _news = [
-          NewsArticle(
-            title: 'Market Update: Stocks Rise on Economic Data',
-            source: 'Financial Times',
-            url: 'https://example.com/market-update',
-            publishedAt: DateTime.now().subtract(const Duration(hours: 3)).toString(),
-            summary: 'Stocks rose today following positive economic data and central bank announcements.',
-            imageUrl: 'https://via.placeholder.com/300x200?text=Market+News',
-            topics: ['Markets', 'Economy', 'Stocks'],
-            tickers: ['SPY', 'QQQ'],
-            sentiment: 0.68,
-          ),
-          NewsArticle(
-            title: 'Tech Sector Leads Market Gains',
-            source: 'Wall Street Journal',
-            url: 'https://example.com/tech-gains',
-            publishedAt: DateTime.now().subtract(const Duration(hours: 6)).toString(),
-            summary: 'Technology stocks led market gains today as investors responded to positive earnings reports.',
-            imageUrl: 'https://via.placeholder.com/300x200?text=Tech+News',
-            topics: ['Technology', 'Markets', 'Earnings'],
-            tickers: ['XLK', 'AAPL', 'MSFT'],
-            sentiment: 0.72,
-          ),
-        ];
-      });
-    }
-  }
-
-  void _navigateToStockDetails(String symbol) {
-    Navigator.pushNamed(
-      context,
-      '/stock_details',
-      arguments: {'symbol': symbol},
-    );
-  }
-
-  void _navigateToNewsDetails(NewsArticle news) {
-    Navigator.pushNamed(
-      context,
-      '/news_details',
-      arguments: {'news': news},
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     
-    if (_isLoading) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SpinKitWave(
-                color: theme.colorScheme.primary,
-                size: 50.0,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Loading market data...',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: theme.colorScheme.onBackground,
-                ),
-              ),
-            ],
+    try {
+      // Load user preferences
+      _preferences = await _preferencesService.getUserPreferences();
+      
+      // Get last location from preferences
+      String? lastLocation = await _preferencesService.getLastLocation();
+      
+      // Try to get current location if no last location
+      if (lastLocation == null || lastLocation.isEmpty) {
+        try {
+          final position = await _locationService.getCurrentLocation();
+          _currentLocation = '${position.latitude},${position.longitude}';
+        } catch (e) {
+          print('Error getting current location: $e');
+          // Use default location if can't get current location
+          _currentLocation = 'London';
+        }
+      } else {
+        _currentLocation = lastLocation;
+      }
+      
+      // Save current location to preferences
+      await _preferencesService.saveLastLocation(_currentLocation);
+      
+      // Get current weather
+      _currentWeather = await _weatherService.getCurrentWeather(_currentLocation);
+      
+      // Get forecast
+      _forecast = await _weatherService.getForecast(
+        _currentLocation, 
+        _preferences.forecastDays,
+      );
+      
+      // Check if location is in favorites
+      try {
+        final favorites = await _databaseService.getFavoriteLocations();
+        _isFavorite = favorites.contains(_currentWeather!.location);
+      } catch (e) {
+        print('Error checking favorites: $e');
+      }
+      
+      // Save to history in Firestore
+      try {
+        await _databaseService.saveWeatherToHistory(_currentWeather!);
+      } catch (e) {
+        print('Error saving to history: $e');
+      }
+      
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading data: $e');
+      setState(() {
+        _isLoading = false;
+        _isError = true;
+        _errorMessage = 'Error loading weather data. Please try again.';
+      });
+    }
+  }
+  
+  Future<void> _toggleFavorite() async {
+    if (_currentWeather == null) return;
+    
+    try {
+      if (_isFavorite) {
+        await _databaseService.removeFavoriteLocation(_currentWeather!.location);
+      } else {
+        await _databaseService.addFavoriteLocation(_currentWeather!.location);
+      }
+      
+      setState(() {
+        _isFavorite = !_isFavorite;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isFavorite 
+            ? '${_currentWeather!.location} added to favorites' 
+            : '${_currentWeather!.location} removed from favorites'
           ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      print('Error toggling favorite: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating favorites. Please try again.'),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
-    
+  }
+  
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('StockWise'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-          ),
-        ],
+      body: _isLoading 
+        ? const LoadingIndicator(message: 'Loading weather data...')
+        : _isError
+          ? ErrorMessage(
+              message: _errorMessage,
+              onRetry: _loadData,
+            )
+          : _buildWeatherContent(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _loadData,
+        tooltip: 'Refresh',
+        child: const Icon(Icons.refresh),
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadData,
-        child: _errorMessage.isNotEmpty
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: theme.colorScheme.error,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Something went wrong',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onBackground,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Text(
-                        _errorMessage,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: theme.colorScheme.onBackground.withOpacity(0.7),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: _loadData,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Try Again'),
-                    ),
-                  ],
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.all(16),
+    );
+  }
+  
+  Widget _buildWeatherContent() {
+    if (_currentWeather == null || _forecast == null) {
+      return const Center(
+        child: Text('No weather data available'),
+      );
+    }
+    
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      child: CustomScrollView(
+        slivers: [
+          _buildAppBar(),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Market Overview Card
-                  MarketOverviewCard(
-                    gainers: _topGainers,
-                    losers: _topLosers,
+                  WeatherCard(
+                    weather: _currentWeather!,
+                    preferences: _preferences,
                   ),
-                  const SizedBox(height: 24),
-                  
-                  // Watchlist Section
-                  _buildSectionHeader('Your Watchlist', Icons.star),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Hourly Forecast',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 8),
-                  _isWatchlistLoading
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: CircularProgressIndicator(),
-                          ),
-                        )
-                      : _watchlist.isEmpty
-                          ? _buildEmptyState(
-                              'No stocks in watchlist',
-                              'Add stocks to your watchlist to track them here',
-                              Icons.star_border,
-                              () {
-                                Navigator.pushNamed(context, '/search');
-                              },
-                              'Add Stocks',
-                            )
-                          : ListView.separated(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _watchlist.length,
-                              separatorBuilder: (context, index) => const Divider(),
-                              itemBuilder: (context, index) {
-                                final stock = _watchlist[index];
-                                return StockListItem(
-                                  stock: stock,
-                                  onTap: () => _navigateToStockDetails(stock.symbol),
-                                  isFavorite: true,
-                                  onFavoriteToggle: () async {
-                                    await _databaseService.removeFromWatchlist(stock.symbol);
-                                    _loadWatchlist();
-                                  },
-                                );
-                              },
-                            ),
-                  const SizedBox(height: 24),
-                  
-                  // Market News Section
-                  _buildSectionHeader('Market News', Icons.newspaper),
+                  HourlyForecastList(
+                    hourlyForecast: _forecast!.hourlyForecast,
+                    preferences: _preferences,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '${_preferences.forecastDays}-Day Forecast',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 8),
-                  _isNewsLoading
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: CircularProgressIndicator(),
-                          ),
-                        )
-                      : _news.isEmpty
-                          ? _buildEmptyState(
-                              'No news available',
-                              'Check back later for market news',
-                              Icons.newspaper,
-                              _loadNews,
-                              'Refresh',
-                            )
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _news.length,
-                              itemBuilder: (context, index) {
-                                final article = _news[index];
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 16),
-                                  child: NewsCard(
-                                    article: article,
-                                    onTap: () => _navigateToNewsDetails(article),
-                                  ),
-                                );
-                              },
+                  ..._forecast!.dailyForecast.map((forecast) => 
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: ForecastCard(
+                        forecast: forecast,
+                        preferences: _preferences,
+                      ),
+                    ),
+                  ).toList(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Weather Details',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  WeatherDetailsCard(
+                    weather: _currentWeather!,
+                    preferences: _preferences,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Weather Advice',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            WeatherUtils.getWeatherDescription(
+                              _currentWeather!.condition, 
+                              _currentWeather!.temperature,
                             ),
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            WeatherUtils.getClothingRecommendation(
+                              _currentWeather!.condition, 
+                              _currentWeather!.temperature,
+                            ),
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            WeatherUtils.getActivityRecommendation(
+                              _currentWeather!.condition, 
+                              _currentWeather!.temperature,
+                            ),
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
                 ],
               ),
-      ),
-    );
-  }
-
-  Widget _buildSectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 20),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildEmptyState(
-    String title,
-    String subtitle,
-    IconData icon,
-    VoidCallback onAction,
-    String actionText,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            size: 48,
-            color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onBackground.withOpacity(0.7),
-            ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: onAction,
-            child: Text(actionText),
           ),
         ],
       ),
+    );
+  }
+  
+  SliverAppBar _buildAppBar() {
+    return SliverAppBar(
+      expandedHeight: 120,
+      floating: true,
+      pinned: true,
+      flexibleSpace: FlexibleSpaceBar(
+        title: Text(
+          _currentWeather?.location ?? 'Weather',
+          style: const TextStyle(color: Colors.white),
+        ),
+        background: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: _currentWeather?.isDay ?? true
+                ? ThemeConstants.dayGradient
+                : ThemeConstants.nightGradient,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        if (_currentWeather != null)
+          IconButton(
+            icon: Icon(
+              _isFavorite ? Icons.favorite : Icons.favorite_border,
+              color: Colors.white,
+            ),
+            onPressed: _toggleFavorite,
+            tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+          ),
+        IconButton(
+          icon: const Icon(Icons.search, color: Colors.white),
+          onPressed: () => Navigator.pushNamed(context, '/search'),
+          tooltip: 'Search location',
+        ),
+      ],
     );
   }
 }

@@ -1,177 +1,151 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:stockwise/models/user.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/user_model.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
-
-  // Create AppUser object from Firebase User
-  AppUser? _userFromFirebaseUser(User? user) {
-    if (user == null) return null;
-    return AppUser.fromFirebaseUser(user);
-  }
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Auth state changes stream
-  Stream<AppUser?> get userStream {
-    return _auth.authStateChanges().map(_userFromFirebaseUser);
-  }
-  
-  // Auth state changes stream for Firebase User
-  Stream<User?> get authStateChanges {
-    return _auth.authStateChanges();
-  }
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
 
   // Get current user
-  AppUser? get currentUser {
-    return _userFromFirebaseUser(_auth.currentUser);
-  }
+  User? get currentUser => _auth.currentUser;
 
   // Sign in with email and password
   Future<UserCredential> signInWithEmailAndPassword(String email, String password) async {
     try {
-      final UserCredential result = await _auth.signInWithEmailAndPassword(
+      return await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
-      return result;
     } catch (e) {
-      throw _handleAuthException(e);
+      throw Exception('Failed to sign in: $e');
     }
   }
 
   // Register with email and password
   Future<UserCredential> registerWithEmailAndPassword(String email, String password) async {
     try {
-      final UserCredential result = await _auth.createUserWithEmailAndPassword(
+      UserCredential result = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+      
+      // Create a new user document in Firestore
+      await _createUserDocument(result.user!);
+      
       return result;
     } catch (e) {
-      throw _handleAuthException(e);
+      throw Exception('Failed to register: $e');
     }
   }
 
-  // Sign in with Google
-  Future<UserCredential> signInWithGoogle() async {
+  // Create user document in Firestore
+  Future<void> _createUserDocument(User user) async {
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      // Check if user document already exists
+      DocumentSnapshot doc = await _firestore.collection('users').doc(user.uid).get();
       
-      if (googleUser == null) {
-        throw Exception('Google sign in aborted');
+      if (!doc.exists) {
+        // Create new user document with default values
+        UserModel newUser = UserModel(
+          id: user.uid,
+          email: user.email!,
+          displayName: user.displayName,
+          photoUrl: user.photoURL,
+          favoriteLocations: [],
+          preferences: UserPreferences().toJson(),
+        );
+        
+        await _firestore.collection('users').doc(user.uid).set(newUser.toJson());
       }
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      return await _auth.signInWithCredential(credential);
     } catch (e) {
-      throw _handleAuthException(e);
+      throw Exception('Failed to create user document: $e');
     }
   }
 
   // Sign out
   Future<void> signOut() async {
     try {
-      await _googleSignIn.signOut();
-      await _auth.signOut();
+      return await _auth.signOut();
     } catch (e) {
-      throw _handleAuthException(e);
+      throw Exception('Failed to sign out: $e');
     }
   }
 
-  // Reset password
-  Future<void> resetPassword(String email) async {
+  // Get user data from Firestore
+  Future<UserModel> getUserData() async {
     try {
-      await _auth.sendPasswordResetEmail(email: email);
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Update profile
-  Future<void> updateProfile({String? displayName, String? photoURL}) async {
-    try {
-      await _auth.currentUser?.updateDisplayName(displayName);
-      await _auth.currentUser?.updatePhotoURL(photoURL);
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Update email
-  Future<void> updateEmail(String email) async {
-    try {
-      await _auth.currentUser?.updateEmail(email);
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Update password
-  Future<void> updatePassword(String password) async {
-    try {
-      await _auth.currentUser?.updatePassword(password);
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Send email verification
-  Future<void> sendEmailVerification() async {
-    try {
-      await _auth.currentUser?.sendEmailVerification();
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Delete account
-  Future<void> deleteAccount() async {
-    try {
-      await _auth.currentUser?.delete();
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Re-authenticate user
-  Future<UserCredential> reauthenticateWithCredential(AuthCredential credential) async {
-    try {
-      return await _auth.currentUser!.reauthenticateWithCredential(credential);
-    } catch (e) {
-      throw _handleAuthException(e);
-    }
-  }
-
-  // Handle Firebase Auth exceptions
-  Exception _handleAuthException(dynamic e) {
-    if (e is FirebaseAuthException) {
-      switch (e.code) {
-        case 'user-not-found':
-          return Exception('No user found with this email.');
-        case 'wrong-password':
-          return Exception('Wrong password provided.');
-        case 'invalid-email':
-          return Exception('The email address is not valid.');
-        case 'user-disabled':
-          return Exception('This user has been disabled.');
-        case 'email-already-in-use':
-          return Exception('The email address is already in use.');
-        case 'operation-not-allowed':
-          return Exception('Email/password accounts are not enabled.');
-        case 'weak-password':
-          return Exception('The password is too weak.');
-        case 'requires-recent-login':
-          return Exception('This operation requires recent authentication. Please log in again.');
-        default:
-          return Exception('Authentication error: ${e.message}');
+      User? user = _auth.currentUser;
+      
+      if (user == null) {
+        throw Exception('No user is currently signed in');
       }
+      
+      DocumentSnapshot doc = await _firestore.collection('users').doc(user.uid).get();
+      
+      if (doc.exists) {
+        return UserModel.fromJson(doc.data() as Map<String, dynamic>);
+      } else {
+        // If document doesn't exist, create it
+        await _createUserDocument(user);
+        
+        // Get the newly created document
+        DocumentSnapshot newDoc = await _firestore.collection('users').doc(user.uid).get();
+        return UserModel.fromJson(newDoc.data() as Map<String, dynamic>);
+      }
+    } catch (e) {
+      throw Exception('Failed to get user data: $e');
     }
-    return Exception('Authentication error: $e');
+  }
+
+  // Update user data in Firestore
+  Future<void> updateUserData(UserModel userData) async {
+    try {
+      User? user = _auth.currentUser;
+      
+      if (user == null) {
+        throw Exception('No user is currently signed in');
+      }
+      
+      await _firestore.collection('users').doc(user.uid).update(userData.toJson());
+    } catch (e) {
+      throw Exception('Failed to update user data: $e');
+    }
+  }
+
+  // Add a location to favorites
+  Future<void> addFavoriteLocation(String location) async {
+    try {
+      User? user = _auth.currentUser;
+      
+      if (user == null) {
+        throw Exception('No user is currently signed in');
+      }
+      
+      await _firestore.collection('users').doc(user.uid).update({
+        'favoriteLocations': FieldValue.arrayUnion([location]),
+      });
+    } catch (e) {
+      throw Exception('Failed to add favorite location: $e');
+    }
+  }
+
+  // Remove a location from favorites
+  Future<void> removeFavoriteLocation(String location) async {
+    try {
+      User? user = _auth.currentUser;
+      
+      if (user == null) {
+        throw Exception('No user is currently signed in');
+      }
+      
+      await _firestore.collection('users').doc(user.uid).update({
+        'favoriteLocations': FieldValue.arrayRemove([location]),
+      });
+    } catch (e) {
+      throw Exception('Failed to remove favorite location: $e');
+    }
   }
 }
